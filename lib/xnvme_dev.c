@@ -8,6 +8,7 @@
 #include <xnvme_cmd.h>
 #include <xnvme_dev.h>
 #include <xnvme_geo.h>
+#include <cuda_runtime.h>
 
 static int
 _zoned_geometry(struct xnvme_dev *dev)
@@ -139,12 +140,18 @@ _dev_idfy_csi(struct xnvme_dev *dev, struct xnvme_spec_idfy *idfy_ns,
 {
 	struct xnvme_cmd_ctx ctx;
 	int err;
+	cudaError_t cudaErr;
 
 	// Attempt to identify ZONED
 
 	struct xnvme_spec_znd_idfy_ns *zns = (void *)idfy_ns;
 
-	memset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	cudaErr = cudaMemset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ctrlr_csi(&ctx, XNVME_SPEC_CSI_ZONED, idfy_ctrlr);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -152,7 +159,11 @@ _dev_idfy_csi(struct xnvme_dev *dev, struct xnvme_spec_idfy *idfy_ns,
 		goto not_zns;
 	}
 
-	memset(idfy_ns, 0, sizeof(*idfy_ns));
+	cudaErr = cudaMemset(idfy_ns, 0, sizeof(*idfy_ns));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ns_csi(&ctx, dev->ident.nsid, XNVME_SPEC_CSI_ZONED, idfy_ns);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -164,8 +175,17 @@ _dev_idfy_csi(struct xnvme_dev *dev, struct xnvme_spec_idfy *idfy_ns,
 		goto not_zns;
 	}
 
-	memcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr));
-	memcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns));
+	cudaErr = cudaMemcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr),
+			     cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+	cudaErr = cudaMemcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns), cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	dev->ident.csi = XNVME_SPEC_CSI_ZONED;
 
 	XNVME_DEBUG("INFO: looks like csi(ZNS)");
@@ -179,7 +199,11 @@ not_zns:
 	struct xnvme_spec_fs_idfy_ctrlr *fs_ctrlr = (void *)idfy_ctrlr;
 	struct xnvme_spec_fs_idfy_ns *fs_ns = (void *)idfy_ns;
 
-	memset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	cudaErr = cudaMemset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ctrlr_csi(&ctx, XNVME_SPEC_CSI_FS, idfy_ctrlr);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -191,7 +215,11 @@ not_zns:
 		goto not_fs;
 	}
 
-	memset(idfy_ns, 0, sizeof(*idfy_ns));
+	cudaErr = cudaMemset(idfy_ns, 0, sizeof(*idfy_ns));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ns_csi(&ctx, dev->ident.nsid, XNVME_SPEC_CSI_FS, idfy_ns);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -203,8 +231,17 @@ not_zns:
 		goto not_fs;
 	}
 
-	memcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr));
-	memcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns));
+	cudaErr = cudaMemcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr),
+			     cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+	cudaErr = cudaMemcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns), cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 
 	XNVME_DEBUG("INFO: looks like csi(FS)");
 	dev->ident.csi = XNVME_SPEC_CSI_FS;
@@ -215,7 +252,11 @@ not_fs:
 
 	// Attempt to identify NVM
 
-	memset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	cudaErr = cudaMemset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ctrlr_csi(&ctx, XNVME_SPEC_CSI_NVM, idfy_ctrlr);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -223,15 +264,28 @@ not_fs:
 		goto not_nvm;
 	}
 
-	memset(idfy_ns, 0, sizeof(*idfy_ns));
+	cudaErr = cudaMemset(idfy_ns, 0, sizeof(*idfy_ns));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ns_csi(&ctx, dev->ident.nsid, XNVME_SPEC_CSI_NVM, idfy_ns);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
 		XNVME_DEBUG("INFO: !xnvme_adm_idfy_ns_csi(CSI_NVM)");
 		goto not_nvm;
 	}
-	memcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr));
-	memcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns));
+	cudaErr = cudaMemcpy(&dev->idcss.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr),
+			     cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+	cudaErr = cudaMemcpy(&dev->idcss.ns, idfy_ns, sizeof(*idfy_ns), cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 
 	XNVME_DEBUG("INFO: looks like csi(NVM)");
 	dev->ident.csi = XNVME_SPEC_CSI_NVM;
@@ -249,6 +303,7 @@ _dev_idfy(struct xnvme_dev *dev)
 	struct xnvme_cmd_ctx ctx = {0};
 	struct xnvme_spec_idfy *idfy_ctrlr = NULL, *idfy_ns = NULL;
 	int err;
+	cudaError_t cudaErr;
 
 	dev->attempted_dev_idfy = true;
 	//
@@ -270,7 +325,11 @@ _dev_idfy(struct xnvme_dev *dev)
 	}
 
 	// Retrieve idfy-ctrlr
-	memset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	cudaErr = cudaMemset(idfy_ctrlr, 0, sizeof(*idfy_ctrlr));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ctrlr(&ctx, idfy_ctrlr);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -279,16 +338,27 @@ _dev_idfy(struct xnvme_dev *dev)
 		goto exit;
 	}
 	// Store idfy-ctrlr in device instance
-	memcpy(&dev->id.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr));
+	cudaErr = cudaMemcpy(&dev->id.ctrlr, idfy_ctrlr, sizeof(*idfy_ctrlr),
+			     cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		err = cudaErr;
+		goto exit;
+	}
+
 	// Store subnqn in device-identifier
-	memcpy(dev->ident.subnqn, idfy_ctrlr->ctrlr.subnqn, sizeof(dev->ident.subnqn));
+	memcpy(dev->ident.subnqn, dev->id.ctrlr.subnqn, sizeof(dev->ident.subnqn));
 
 	if (dev->ident.dtype == XNVME_DEV_TYPE_NVME_CONTROLLER) {
 		goto exit;
 	}
 
 	// Retrieve idfy-ns
-	memset(idfy_ns, 0, sizeof(*idfy_ns));
+	cudaErr = cudaMemset(idfy_ns, 0, sizeof(*idfy_ns));
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	ctx = xnvme_cmd_ctx_from_dev(dev);
 	err = xnvme_adm_idfy_ns(&ctx, dev->ident.nsid, idfy_ns);
 	if (err || xnvme_cmd_ctx_cpl_status(&ctx)) {
@@ -297,7 +367,12 @@ _dev_idfy(struct xnvme_dev *dev)
 		goto exit;
 	}
 	// Store idfy-ns in device instance
-	memcpy(&dev->id.ns, idfy_ns, sizeof(*idfy_ns));
+	cudaErr = cudaMemcpy(&dev->id.ns, idfy_ns, sizeof(*idfy_ns), cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		err = cudaErr;
+		goto exit;
+	}
 
 	err = _dev_idfy_csi(dev, idfy_ns, idfy_ctrlr);
 	if (err) {

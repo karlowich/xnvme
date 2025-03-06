@@ -8,6 +8,7 @@
 #include <libxnvme.h>
 #include <xnvme_dev.h>
 #include <xnvme_be.h>
+#include <cuda_runtime.h>
 
 void *
 xnvme_buf_virt_alloc(size_t alignment, size_t nbytes)
@@ -174,14 +175,15 @@ xnvme_buf_to_file(void *buf, size_t nbytes, const char *path)
 int
 xnvme_buf_fill(void *buf, size_t nbytes, const char *content)
 {
-	uint8_t *cbuf = buf;
+	cudaError_t cudaErr;
+	uint8_t *cbuf = malloc(nbytes);
 
 	if (!strncmp(content, "anum", 4)) {
 		for (size_t i = 0; i < nbytes; ++i) {
 			cbuf[i] = (i % 26) + 65;
 		}
 
-		return 0;
+		goto memcpy;
 	}
 
 	if (!strncmp(content, "rand-t", 6)) {
@@ -190,7 +192,7 @@ xnvme_buf_fill(void *buf, size_t nbytes, const char *content)
 			cbuf[i] = (rand() % 26) + 65;
 		}
 
-		return 0;
+		goto memcpy;
 	}
 
 	if (!strncmp(content, "rand-k", 6)) {
@@ -199,7 +201,7 @@ xnvme_buf_fill(void *buf, size_t nbytes, const char *content)
 			cbuf[i] = (rand() % 26) + 65;
 		}
 
-		return 0;
+		goto memcpy;
 	}
 
 	if (!strncmp(content, "ascii", 5)) {
@@ -207,25 +209,51 @@ xnvme_buf_fill(void *buf, size_t nbytes, const char *content)
 			cbuf[i] = (i % 26) + 65;
 		}
 
-		return 0;
+		goto memcpy;
 	}
 
 	if (!strncmp(content, "zero", 4)) {
-		xnvme_buf_clear(buf, nbytes);
-
-		return 0;
+		cudaErr = cudaMemset(buf, 0, nbytes);
+		if (cudaErr != cudaSuccess) {
+			XNVME_DEBUG("FAILED: cudaMemset, err: %s", cudaGetErrorString(cudaErr))
+			return cudaErr;
+		}
+		goto exit;
 	}
 
+	free(cbuf);
 	return xnvme_buf_from_file(buf, nbytes, content);
+
+memcpy:
+	cudaErr = cudaMemcpy(buf, cbuf, nbytes, cudaMemcpyHostToDevice);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+exit:
+	free(cbuf);
+	return 0;
 }
 
 size_t
 xnvme_buf_diff(const void *expected, const void *actual, size_t nbytes)
 {
-	const uint8_t *exp = expected;
-	const uint8_t *act = actual;
+	uint8_t *exp = malloc(nbytes);
+	uint8_t *act = malloc(nbytes);
+	cudaError_t cudaErr;
 	size_t diff = 0;
 
+	cudaErr = cudaMemcpy(exp, expected, nbytes, cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
+
+	cudaErr = cudaMemcpy(act, actual, nbytes, cudaMemcpyDeviceToHost);
+	if (cudaErr != cudaSuccess) {
+		XNVME_DEBUG("FAILED: cudaMemcpy, err: %s", cudaGetErrorString(cudaErr))
+		return cudaErr;
+	}
 	for (size_t i = 0; i < nbytes; ++i) {
 		if (exp[i] == act[i]) {
 			continue;
@@ -233,6 +261,9 @@ xnvme_buf_diff(const void *expected, const void *actual, size_t nbytes)
 
 		++diff;
 	}
+
+	free(exp);
+	free(act);
 
 	return diff;
 }

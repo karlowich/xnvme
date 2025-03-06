@@ -16,10 +16,12 @@ static int
 _cmp(const void *vaddr, const struct skiplist_node *n)
 {
 	struct xnvme_be_bam_memory *m = container_of(n, struct xnvme_be_bam_memory, list);
+	uint64_t a = (uint64_t) vaddr;
+	uint64_t b = (uint64_t) m->mem->vaddr;
 
-	if (vaddr < m->mem->vaddr)
+	if (a < b)
 		return -1;
-	else if (vaddr >= (char *) m->mem->vaddr + m->mem->n_ioaddrs*m->mem->page_size)
+	else if (a >= b + m->mem->n_ioaddrs*m->mem->page_size)
 		return 1;
 
 	return 0;
@@ -40,14 +42,15 @@ xnvme_be_bam_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *phy
 	void *buf;
 	nvm_dma_t *mem;
 	int err;
+	int size = NVM_PAGE_ALIGN(nbytes, 1 << 16); //align to 64K
 
-	err = posix_memalign(&buf, 4096, nbytes);
+	err = cudaMalloc(&buf, size);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
 		return NULL;
 	}
 
-	err = nvm_dma_map_host(&mem, state->ctrlr, buf, nbytes);
+	err = nvm_dma_map_device(&mem, state->ctrlr, buf, nbytes);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
 		free(buf);
