@@ -36,10 +36,12 @@ extern "C" {
 struct xnvme_be_bam_state {
 	nvm_ctrl_t *ctrlr;
 	nvm_admin_reference *aq;
-
+	nvm_queue_t *sq;
+	nvm_queue_t *cq;
 	struct skiplist *list;
+	uint8_t qid;
 
-	uint8_t _rvds[104];
+	uint8_t _rvds[87];
 };
 XNVME_STATIC_ASSERT(sizeof(struct xnvme_be_bam_state) == XNVME_BE_STATE_NBYTES, "Incorrect size")
 

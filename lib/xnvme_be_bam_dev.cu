@@ -20,6 +20,9 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 	nvm_dma_t *aq_mem;
 	void *buf;
 	int fd, err;
+	cudaError_t cudaErr;
+	uint16_t n_qps;
+	uint16_t n_sqs = XNVME_BE_BAM_NQUEUES_MAX, n_cqs = XNVME_BE_BAM_NQUEUES_MAX;
 
 	fd = open(ident->uri, O_RDWR);
 
@@ -61,6 +64,33 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		XNVME_DEBUG("FAILED: could not create admin queues, err: %d", err);
 		return err;
 	}
+	// QID 0 is the ADMIN queue
+	state->qid = 1;
+
+	cudaErr = cudaHostRegister((void*) state->ctrlr->mm_ptr, NVM_CTRL_MEM_MINSIZE, cudaHostRegisterIoMemory);
+	if (err != cudaSuccess) {
+		XNVME_DEBUG("FAILED: could not map IO memory, err: %s", cudaGetErrorString(cudaErr));
+		return cudaErr;
+	}
+
+	err = nvm_admin_request_num_queues(state->aq, &n_sqs, &n_cqs);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not reserve I/O queues, err: %d", err);
+		return err;
+	}
+
+	n_qps = XNVME_MIN(n_sqs, n_cqs);
+	state->sq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t) * n_qps);
+	if (!state->sq) {
+			XNVME_DEBUG("FAILED: could not allocate memory for SQ");
+			return -ENOMEM;
+	}
+
+	state->cq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t) * n_qps);
+	if (!state->cq) {
+			XNVME_DEBUG("FAILED: could not allocate memory for CQ");
+			return -ENOMEM;
+	}
 
 	dev->ident.dtype = XNVME_DEV_TYPE_NVME_NAMESPACE;
 	dev->ident.nsid = dev->opts.nsid;
@@ -74,6 +104,8 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
+	free(state->sq);
+	free(state->cq);
 	nvm_aq_destroy(state->aq);
 	nvm_ctrl_free(state->ctrlr);
 }
