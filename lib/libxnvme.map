@@ -114,6 +114,9 @@
 		xnvme_geo_type;
 		xnvme_geo;
 
+		# libxnvme_gpu.h
+		xnvme_gpu_cmd_submit;
+
 		# libxnvme_ident.h
 		xnvme_ident;
 		xnvme_ident_from_uri;
