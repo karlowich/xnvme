@@ -74,6 +74,7 @@ xnvmelib_source += files(
   'xnvme_geo.c',
   'xnvme_gpu.cu',
   'xnvme_ident.c',
+  'xnvme_io.c',
   'xnvme_kvs.c',
   'xnvme_lba.c',
   'xnvme_libconf.c',
