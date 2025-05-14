@@ -7,6 +7,7 @@ examples_source = [
   'xnvme_enum.c',
   'xnvme_hello.c',
   'xnvme_io_async.c',
+  'xnvme_io_range.c',
   'xnvme_single_async.c',
   'xnvme_single_async_efd.c',
   'xnvme_single_sync.c',

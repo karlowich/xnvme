@@ -80,6 +80,7 @@ xnvmelib_source += files(
   'xnvme_file.c',
   'xnvme_geo.c',
   'xnvme_ident.c',
+  'xnvme_io.c',
   'xnvme_kernels.cu',
   'xnvme_kvs.c',
   'xnvme_lba.c',

@@ -118,6 +118,9 @@
 		xnvme_ident;
 		xnvme_ident_from_uri;
 
+		# libxnvme_io.h
+		xnvme_io_range_submit;
+
 		# libxnvme_kernels.h
 		xnvme_kernels_cmd_submit;
 
