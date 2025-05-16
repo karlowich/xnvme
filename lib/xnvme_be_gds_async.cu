@@ -140,6 +140,7 @@ xnvme_be_gds_queue_poke(struct xnvme_queue *queue, uint32_t max)
 		if (!cpl) {
 			break;
 		}
+		nvm_sq_update(q->sq);
 
 		reaped++;
 
@@ -153,7 +154,6 @@ xnvme_be_gds_queue_poke(struct xnvme_queue *queue, uint32_t max)
 
 	if (reaped) {
 		nvm_cq_update(q->cq);
-		nvm_sq_update(q->sq);
 	}
 
 	return reaped;
