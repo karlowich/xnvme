@@ -36,6 +36,7 @@ tests = {
     ['multi', ['multi', '--count', '4']],
   ],
   'gpu_ioworker.cu': [],
+  'gpu_range_ioworker.cu': [],
   'ioworker.c': [
     ['verify', ['verify', '1GB']],
     ['verify_sync', ['verify-sync', '1GB']],

@@ -10,3 +10,7 @@ int
 xnvme_kernels_cmd_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev,
 			 uint32_t opc, uint32_t slba, uint32_t elba, uint32_t nlb, uint64_t nbytes,
 			 void *dbuf);
+int
+xnvme_kernels_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev,
+			   uint32_t opc, uint32_t *slbas, uint32_t *elbas, uint32_t nlb,
+			   uint64_t nbytes, void **dbufs, uint32_t n_ranges);

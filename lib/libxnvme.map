@@ -123,6 +123,7 @@
 
 		# libxnvme_kernels.h
 		xnvme_kernels_cmd_submit;
+		xnvme_kernels_range_submit;
 
 		# libxnvme_kvs.h
 		xnvme_retreive_opts;
