@@ -147,14 +147,10 @@ xnvme_be_gds_queue_poke(struct xnvme_queue *queue, uint32_t max)
 		ctx = (struct xnvme_cmd_ctx *)&queue->pool_storage[cpl->cid];
 		memcpy(&ctx->cpl, cpl, sizeof(ctx->cpl));
 		ctx->async.cb(ctx, ctx->async.cb_arg);
+		nvm_cq_update(q->cq);
+		queue->base.outstanding--;
 
 	} while (reaped < max);
-
-	queue->base.outstanding -= reaped;
-
-	if (reaped) {
-		nvm_cq_update(q->cq);
-	}
 
 	return reaped;
 }
