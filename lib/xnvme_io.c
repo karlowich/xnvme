@@ -29,6 +29,14 @@ _submit(struct work *work, struct xnvme_cmd_ctx *ctx)
 	int err;
 	ctx->cmd.common.opcode = work->opc;
 	ctx->cmd.common.nsid = xnvme_dev_get_nsid(ctx->dev);
+	if (work->ranges[work->cur_range].slba >= work->ranges[work->cur_range].elba) {
+		work->cur_range += 1;
+	}
+	if (work->cur_range >= work->n_ranges) {
+		xnvme_queue_put_cmd_ctx(ctx->async.queue, ctx);
+		return 0;
+	}
+
 	ctx->cmd.nvm.slba = work->ranges[work->cur_range].slba;
 	ctx->cmd.nvm.nlb = work->nlb;
 
@@ -38,10 +46,6 @@ submit:
 	switch (err) {
 	case 0:
 		work->ranges[work->cur_range].slba += (work->nlb + 1);
-		if (work->ranges[work->cur_range].slba >= work->ranges[work->cur_range].elba) {
-			work->cur_range += 1;
-			break;
-		}
 		work->ranges[work->cur_range].dbuf += (work->nlb + 1) * work->nbytes;
 		break;
 
