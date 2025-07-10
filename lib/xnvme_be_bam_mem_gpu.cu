@@ -34,7 +34,7 @@ xnvme_be_bam_memory_find(struct xnvme_be_bam_state *state, void *buf)
 }
 
 void *
-xnvme_be_bam_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *XNVME_UNUSED(phys))
+xnvme_be_bam_gpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *XNVME_UNUSED(phys))
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
@@ -90,7 +90,7 @@ error:
 }
 
 void
-xnvme_be_bam_buf_free(const struct xnvme_dev *dev, void *buf)
+xnvme_be_bam_gpu_buf_free(const struct xnvme_dev *dev, void *buf)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
@@ -111,12 +111,12 @@ xnvme_be_bam_buf_free(const struct xnvme_dev *dev, void *buf)
 
 #endif
 
-struct xnvme_be_mem g_xnvme_be_bam_mem = {
+struct xnvme_be_mem g_xnvme_be_bam_mem_gpu = {
 #ifdef XNVME_BE_BAM_ENABLED
-	.buf_alloc = xnvme_be_bam_buf_alloc,
+	.buf_alloc = xnvme_be_bam_gpu_buf_alloc,
 	.buf_vtophys = xnvme_be_nosys_buf_vtophys,
 	.buf_realloc = xnvme_be_nosys_buf_realloc,
-	.buf_free = xnvme_be_bam_buf_free,
+	.buf_free = xnvme_be_bam_gpu_buf_free,
 	.mem_map = xnvme_be_nosys_mem_map,
 	.mem_unmap = xnvme_be_nosys_mem_unmap,
 #else
@@ -127,5 +127,5 @@ struct xnvme_be_mem g_xnvme_be_bam_mem = {
 	.mem_map = xnvme_be_nosys_mem_map,
 	.mem_unmap = xnvme_be_nosys_mem_unmap,
 #endif
-	.id = "bam",
+	.id = "gpu",
 };

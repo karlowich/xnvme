@@ -36,9 +36,17 @@ struct xnvme_be_mixin g_xnvme_be_mixin_bam[] = {
 
 	{
 		.mtype = XNVME_BE_MEM,
-		.name = "bam",
-		.descr = "Use libc malloc()/free() with sysconf for alignment",
-		.mem = &g_xnvme_be_bam_mem,
+		.name = "gpu",
+		.descr = "Use buffers in GPU memory",
+		.mem = &g_xnvme_be_bam_mem_gpu,
+		.check_support = xnvme_be_supported,
+	},
+
+	{
+		.mtype = XNVME_BE_MEM,
+		.name = "cpu",
+		.descr = "Use buffers in CPU memory",
+		.mem = &g_xnvme_be_bam_mem_cpu,
 		.check_support = xnvme_be_supported,
 	},
 
