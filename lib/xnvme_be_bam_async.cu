@@ -31,6 +31,7 @@ xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 	struct xnvme_dev *dev = queue->base.dev;
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)queue->base.dev->be.state;
 	void *cq_buf, *sq_buf;
+	struct local_admin *admin;
 	int err, qid = state->qid++, qloc = state->qloc++;
 	bool gpu_mem = !strcmp(dev->be.mem.id, "gpu");
 
@@ -86,17 +87,22 @@ xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 		return err;
 	}
 
+	admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
+	pthread_mutex_lock(&admin->mutex);
 	err = nvm_admin_cq_create(state->aq, &state->cq[qloc], qid, queue->cq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O completion queue, err: %d", err);
+		pthread_mutex_unlock(&admin->mutex);
 		return err;
 	}
 
 	err = nvm_admin_sq_create(state->aq, &state->sq[qloc], &state->cq[qloc], qid, queue->sq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O submission queue, err: %d", err);
+		pthread_mutex_unlock(&admin->mutex);
 		return err;
 	}
+	pthread_mutex_unlock(&admin->mutex);
 
 	queue->cq = &state->cq[qloc];
 	queue->sq = &state->sq[qloc];
@@ -109,19 +115,25 @@ xnvme_be_bam_queue_term(struct xnvme_queue *q)
 {
 	struct xnvme_queue_bam *queue = (struct xnvme_queue_bam *)q;
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)queue->base.dev->be.state;
+	struct local_admin *admin;
 	int err;
 
+	admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
+	pthread_mutex_lock(&admin->mutex);
 	err = nvm_admin_sq_delete(state->aq, queue->sq, queue->cq);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not delete I/O submission queue, err: %d", err);
+		pthread_mutex_unlock(&admin->mutex);
 		return err;
 	}
 
 	err = nvm_admin_cq_delete(state->aq, queue->cq);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not delete I/O completion queue, err: %d", err);
+		pthread_mutex_unlock(&admin->mutex);
 		return err;
 	}
+	pthread_mutex_unlock(&admin->mutex);
 
 	nvm_dma_unmap(queue->cq_mem);
 	nvm_dma_unmap(queue->sq_mem);
