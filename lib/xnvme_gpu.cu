@@ -126,3 +126,15 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 
 	return 0;
 }
+
+void *
+xnvme_gpu_alloc(const struct xnvme_dev *dev, size_t nbytes)
+{
+	return xnvme_be_bam_gpu_buf_alloc(dev, nbytes, 0);
+}
+
+void
+xnvme_gpu_free(const struct xnvme_dev *dev, void *buf)
+{
+	xnvme_be_bam_gpu_buf_free(dev, buf);
+}

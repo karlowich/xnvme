@@ -65,6 +65,13 @@ __device__ int
 xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes,
 			 void *XNVME_UNUSED(mbuf), size_t XNVME_UNUSED(mbuf_nbytes));
 
+void *
+xnvme_be_bam_gpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes,
+			   uint64_t *XNVME_UNUSED(phys));
+
+void
+xnvme_be_bam_gpu_buf_free(const struct xnvme_dev *dev, void *buf);
+
 extern struct xnvme_be_admin g_xnvme_be_bam_admin;
 extern struct xnvme_be_sync g_xnvme_be_bam_sync;
 extern struct xnvme_be_async g_xnvme_be_bam_async;

@@ -117,6 +117,8 @@
 		# libxnvme_gpu.h
 		xnvme_gpu_cmd_submit;
 		xnvme_gpu_range_submit;
+		xnvme_gpu_alloc;
+		xnvme_gpu_free;
 
 		# libxnvme_ident.h
 		xnvme_ident;
