@@ -23,7 +23,7 @@ xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyt
 	uint64_t offset, remainder, prp1, prp2 = 0;
 
 	if (lane_id() == 0) {
-		qid = state->queue_counter.fetch_add(1, simt::memory_order_relaxed) % XNVME_BE_BAM_NQUEUES_MAX;
+		qid = state->queue_counter.fetch_add(1, simt::memory_order_relaxed) % state->n_qps;
 	}
 	qid = __shfl_sync(0xFFFFFFFF, qid, 0);
 

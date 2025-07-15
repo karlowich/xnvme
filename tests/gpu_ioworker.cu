@@ -72,10 +72,17 @@ iowork_pp(struct iowork *work)
 static int
 iowork_teardown(struct iowork *work)
 {
-	xnvme_buf_free(work->dev, work->rbuf);
-	xnvme_buf_free(work->dev, work->wbuf);
+	int err = 0;
 
-	return 0;
+	err = xnvme_gpu_delete_queues(work->dev);
+	if (err) {
+		XNVME_DEBUG("FAILED: xnvme_gpu_delete_queues(), err: %d", err);
+	}
+
+	xnvme_gpu_free(work->dev, work->rbuf);
+	xnvme_gpu_free(work->dev, work->wbuf);
+
+	return err;
 }
 
 static int
@@ -100,18 +107,24 @@ iowork_from_cli(struct xnvme_cli *cli, struct iowork *work)
 
 	work->nio = work->range.naddr / work->io.naddr;
 
-	work->wbuf = (char *) xnvme_buf_alloc(cli->args.dev, work->range.nbytes);
+	err = xnvme_gpu_create_queues(cli->args.dev, 1024, 16);
+	if (err) {
+		XNVME_DEBUG("FAILED: xnvme_gpu_create_queues(), err: %d", err);
+		return err;
+	}
+
+	work->wbuf = (char *) xnvme_gpu_alloc(cli->args.dev, work->range.nbytes);
 	if (!work->wbuf) {
 		err = -errno;
-		XNVME_DEBUG("FAILED: xnvme_buf_alloc(wbuf), err: %d", errno);
+		XNVME_DEBUG("FAILED: xnvme_gpu_alloc(wbuf), err: %d", errno);
 		goto failed;
 	}
 	xnvme_buf_fill(work->wbuf, work->range.nbytes, "rand-t");
 
-	work->rbuf = (char *) xnvme_buf_alloc(cli->args.dev, work->range.nbytes);
+	work->rbuf = (char *) xnvme_gpu_alloc(cli->args.dev, work->range.nbytes);
 	if (!work->rbuf) {
 		err = -errno;
-		XNVME_DEBUG("FAILED: xnvme_buf_alloc(rbuf), err: %d", errno);
+		XNVME_DEBUG("FAILED: xnvme_gpu_alloc(rbuf), err: %d", errno);
 		goto failed;
 	}
 	xnvme_buf_fill(work->rbuf, work->range.nbytes, "zero");

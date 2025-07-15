@@ -33,13 +33,6 @@ xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 	void *cq_buf, *sq_buf;
 	struct local_admin *admin;
 	int err, qid = state->qid++, qloc = state->qloc++;
-	bool gpu_mem = !strcmp(dev->be.mem.id, "gpu");
-
-	XNVME_DEBUG("gpu mem: %u\n", gpu_mem);
-	if (gpu_mem) {
-		XNVME_DEBUG("FAILED: can't allocate I/O queues on gpu memory");
-		return -EINVAL;
-	}
 
 	// Whether the controller requires contiguous phys mem for queues
 	bool contiguous_queues = !!_RB(*_REG(state->ctrlr->mm_ptr, 0x0000, 64), 16, 16);

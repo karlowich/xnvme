@@ -138,3 +138,16 @@ xnvme_gpu_free(const struct xnvme_dev *dev, void *buf)
 {
 	xnvme_be_bam_gpu_buf_free(dev, buf);
 }
+
+int
+xnvme_gpu_create_queues(struct xnvme_dev *dev, uint16_t capacity, uint16_t nqueues)
+{
+	return xnvme_be_bam_gpu_create_queues(dev, capacity, nqueues);
+}
+
+
+int
+xnvme_gpu_delete_queues(struct xnvme_dev *dev)
+{
+	return xnvme_be_bam_gpu_delete_queues(dev);
+}

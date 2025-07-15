@@ -109,14 +109,91 @@ xnvme_be_bam_gpu_buf_free(const struct xnvme_dev *dev, void *buf)
 	cudaFree(m);
 }
 
+
+void *
+xnvme_be_bam_cpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *XNVME_UNUSED(phys))
+{
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
+	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
+	struct xnvme_be_bam_memory *m;
+	void *buf;
+	nvm_dma_t *mem;
+	int err;
+	uint64_t size = NVM_PAGE_ALIGN(nbytes, 1 << 12); //align to 4K
+
+	err = cudaMallocHost(&buf, size);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
+		return NULL;
+	}
+
+	err = nvm_dma_map_host(&mem, state->ctrlr, buf, nbytes);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
+		cudaFree(buf);
+		return NULL;
+	}
+
+	if (skiplist_find(state->list, mem->vaddr, _cmp, update)) {
+			XNVME_DEBUG("FAILED: mem->vaddr already exist in the skiplist");
+			goto error;
+	}
+
+	err = cudaHostRegister(mem, sizeof(nvm_dma_t), cudaHostRegisterDefault);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
+		goto error;
+	}
+
+	err = cudaHostRegister(mem->ioaddrs, sizeof(uint64_t) * mem->n_ioaddrs, cudaHostRegisterDefault);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
+		goto error;
+	}
+
+	err = cudaMallocManaged(&m, NVM_PAGE_ALIGN(sizeof(struct xnvme_be_bam_memory), 1 << 12));
+	if (err) {
+		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
+		goto error;
+	}
+
+	m->mem = mem;
+
+	skiplist_link(state->list, &m->list, update);
+	return mem->vaddr;
+
+error:
+		nvm_dma_unmap(mem);
+		return NULL;
+}
+
+void
+xnvme_be_bam_cpu_buf_free(const struct xnvme_dev *dev, void *buf)
+{
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
+	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
+	struct xnvme_be_bam_memory *m;
+
+	m = container_of_or_null(skiplist_find(state->list, buf, _cmp, update), struct xnvme_be_bam_memory, list);
+	if (!m) {
+		XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
+		return;
+	}
+
+	skiplist_erase(state->list, &m->list, update);
+	cudaHostUnregister(m->mem->ioaddrs);
+	cudaHostUnregister(m->mem);
+	nvm_dma_unmap(m->mem);
+	cudaFree(m);
+}
 #endif
 
-struct xnvme_be_mem g_xnvme_be_bam_mem_gpu = {
+struct xnvme_be_mem g_xnvme_be_bam_mem = {
 #ifdef XNVME_BE_BAM_ENABLED
-	.buf_alloc = xnvme_be_bam_gpu_buf_alloc,
+	.buf_alloc = xnvme_be_bam_cpu_buf_alloc,
 	.buf_vtophys = xnvme_be_nosys_buf_vtophys,
 	.buf_realloc = xnvme_be_nosys_buf_realloc,
-	.buf_free = xnvme_be_bam_gpu_buf_free,
+	.buf_free = xnvme_be_bam_cpu_buf_free,
 	.mem_map = xnvme_be_nosys_mem_map,
 	.mem_unmap = xnvme_be_nosys_mem_unmap,
 #else
@@ -127,5 +204,5 @@ struct xnvme_be_mem g_xnvme_be_bam_mem_gpu = {
 	.mem_map = xnvme_be_nosys_mem_map,
 	.mem_unmap = xnvme_be_nosys_mem_unmap,
 #endif
-	.id = "gpu",
+	.id = "bam",
 };

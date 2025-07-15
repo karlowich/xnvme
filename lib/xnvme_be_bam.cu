@@ -36,17 +36,9 @@ struct xnvme_be_mixin g_xnvme_be_mixin_bam[] = {
 
 	{
 		.mtype = XNVME_BE_MEM,
-		.name = "gpu",
-		.descr = "Use buffers in GPU memory",
-		.mem = &g_xnvme_be_bam_mem_gpu,
-		.check_support = xnvme_be_supported,
-	},
-
-	{
-		.mtype = XNVME_BE_MEM,
-		.name = "cpu",
+		.name = "bam",
 		.descr = "Use buffers in CPU memory",
-		.mem = &g_xnvme_be_bam_mem_cpu,
+		.mem = &g_xnvme_be_bam_mem,
 		.check_support = xnvme_be_supported,
 	},
 

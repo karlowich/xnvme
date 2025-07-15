@@ -19,3 +19,9 @@ xnvme_gpu_alloc(const struct xnvme_dev *dev, size_t nbytes);
 
 void
 xnvme_gpu_free(const struct xnvme_dev *dev, void *buf);
+
+int
+xnvme_gpu_create_queues(struct xnvme_dev *dev, uint16_t capacity, uint16_t nqueues);
+
+int
+xnvme_gpu_delete_queues(struct xnvme_dev *dev);

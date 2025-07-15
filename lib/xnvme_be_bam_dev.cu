@@ -14,10 +14,10 @@ extern "C" {
 int g_shmid_shared;
 
 int
-xnvme_be_bam_queue_term(struct xnvme_be_bam_state *state, int qid)
+xnvme_be_bam_gpu_queue_term(struct xnvme_be_bam_state *state, uint16_t pos)
 {
-	nvm_queue_t *sq = &state->sq[qid], *cq = &state->cq[qid];
-	nvm_dma_t *sq_mem = state->sq_mem[qid], *cq_mem = state->cq_mem[qid];
+	nvm_queue_t *sq = &state->sq[pos], *cq = &state->cq[pos];
+	nvm_dma_t *sq_mem = state->sq_mem[pos], *cq_mem = state->cq_mem[pos];
 	int err;
 
 	cudaFree(sq->cid);
@@ -46,14 +46,14 @@ xnvme_be_bam_queue_term(struct xnvme_be_bam_state *state, int qid)
 }
 
 int
-bam_queue_init(struct xnvme_be_bam_state *state, int qid)
+xnvme_be_bam_gpu_queue_init(struct xnvme_be_bam_state *state, uint16_t qd, uint16_t pos)
 {
-	nvm_queue_t *sq = &state->sq[qid], *cq = &state->cq[qid];
-	nvm_dma_t *sq_mem = state->sq_mem[qid], *cq_mem = state->cq_mem[qid];
+	nvm_queue_t *sq = &state->sq[pos], *cq = &state->cq[pos];
+	nvm_dma_t *sq_mem = state->sq_mem[pos], *cq_mem = state->cq_mem[pos];
 	void *cq_buf, *sq_buf;
 	void *cq_db, *sq_db;
+	uint16_t qid = ++state->qid;
 	int err;
-	int qd = XNVME_BE_BAM_QD_MAX;
 
 	// create CQ
 	err = cudaMalloc(&cq_buf, NVM_PAGE_ALIGN(qd*sizeof(nvm_cpl_t), 1 << 16)); //align to 64k
@@ -65,11 +65,11 @@ bam_queue_init(struct xnvme_be_bam_state *state, int qid)
 	err = nvm_dma_map_device(&cq_mem, state->ctrlr, cq_buf, qd*sizeof(nvm_cpl_t));
 	if (err) {
 		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
-		free(cq_buf);
+		cudaFree(cq_buf);
 		return err;
 	}
 
-	err = nvm_admin_cq_create(state->aq, cq, qid + 1, cq_mem, 0, qd, false);
+	err = nvm_admin_cq_create(state->aq, cq, qid, cq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O completion queue, err: %d", err);
 		return err;
@@ -105,11 +105,11 @@ bam_queue_init(struct xnvme_be_bam_state *state, int qid)
 	err = nvm_dma_map_device(&sq_mem, state->ctrlr, sq_buf, qd*sizeof(nvm_cmd_t));
 	if (err) {
 		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
-		free(sq_buf);
+		cudaFree(sq_buf);
 		return err;
 	}
 
-	err = nvm_admin_sq_create(state->aq, sq, cq, qid + 1, sq_mem, 0, qd, false);
+	err = nvm_admin_sq_create(state->aq, sq, cq, qid, sq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O submission queue, err: %d", err);
 		return err;
@@ -144,6 +144,81 @@ bam_queue_init(struct xnvme_be_bam_state *state, int qid)
 }
 
 int
+xnvme_be_bam_gpu_create_queues(struct xnvme_dev *dev, uint16_t qd, uint16_t n_qps)
+{
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
+	struct local_admin *admin;
+	int err;
+
+	err = cudaMallocManaged(&state->sq, NVM_PAGE_ALIGN(sizeof(nvm_queue_t) * n_qps, 1 << 16));
+	if (err) {
+		XNVME_DEBUG("FAILED: could not allocate memory for SQ, err: %d", err);
+		return err;
+	}
+	err = cudaMallocManaged(&state->cq, NVM_PAGE_ALIGN(sizeof(nvm_queue_t) * n_qps, 1 << 16));
+	if (err) {
+		XNVME_DEBUG("FAILED: could not allocate memory for CQ, err: %d", err);
+		return err;
+	}
+
+	state->sq_mem = (nvm_dma_t **) calloc(n_qps, sizeof(nvm_dma_t *));
+	if (!state->sq_mem) {
+		err = errno;
+		XNVME_DEBUG("FAILED: could not allocate memory for SQMEM, err: %d", err);
+		return err;
+	}
+
+	state->cq_mem = (nvm_dma_t **) calloc(n_qps, sizeof(nvm_dma_t *));
+	if (!state->cq_mem) {
+		err = errno;
+		XNVME_DEBUG("FAILED: could not allocate memory for CQMEM, err: %d", err);
+		return err;
+	}
+
+	admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
+	pthread_mutex_lock(&admin->mutex);
+	for (uint16_t i = 0; i < n_qps; i++) {
+		err = xnvme_be_bam_gpu_queue_init(state, qd, i);
+		if (err) {
+			XNVME_DEBUG("FAILED: could not allocate QP: %d, err: %d", i, err);
+			pthread_mutex_unlock(&admin->mutex);
+			return err;
+		}
+	}
+	pthread_mutex_unlock(&admin->mutex);
+
+	state->n_qps = n_qps;
+	return 0;
+}
+
+int
+xnvme_be_bam_gpu_delete_queues(struct xnvme_dev *dev)
+{
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
+	struct local_admin *admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
+	int err;
+
+	pthread_mutex_lock(&admin->mutex);
+	for (int i = 0; i < state->n_qps; i++) {
+		err = xnvme_be_bam_gpu_queue_term(state, i);
+		if (err) {
+			XNVME_DEBUG("FAILED: could not terminate QP: %d, err: %d", i, err);
+			pthread_mutex_unlock(&admin->mutex);
+			return err;
+		}
+	}
+	pthread_mutex_unlock(&admin->mutex);
+	state->qid -= state->n_qps;
+	state->n_qps = 0;
+
+	cudaFree(state->sq);
+	cudaFree(state->cq);
+	free(state->sq_mem);
+	free(state->cq_mem);
+	return 0;
+}
+
+int
 xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
@@ -152,9 +227,6 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 	void *buf;
 	int fd, err;
 	struct local_admin *admin;
-	uint16_t n_qps;
-	uint16_t n_sqs = XNVME_BE_BAM_NQUEUES_MAX, n_cqs = XNVME_BE_BAM_NQUEUES_MAX;
-	bool gpu_mem = !strcmp(dev->be.mem.id, "gpu");
 
 	fd = open(ident->uri, O_RDWR);
 
@@ -170,24 +242,16 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		return err;
 	}
 
-	if (gpu_mem) {
-		err = cudaHostRegister(state->ctrlr, sizeof(nvm_ctrl_t), cudaHostRegisterDefault);
-		if (err) {
-			XNVME_DEBUG("FAILED: could not map ctrlr memory, err: %d", err);
-			return err;
-		}
+	err = cudaHostRegister(state->ctrlr, sizeof(nvm_ctrl_t), cudaHostRegisterDefault);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not map ctrlr memory, err: %d", err);
+		return err;
+	}
 
-		err = cudaMallocManaged(&state->list, NVM_PAGE_ALIGN(sizeof(struct skiplist), 1 << 16));
-		if (err) {
-			XNVME_DEBUG("FAILED: could not allocate memory for skiplist, err: %d", err);
-			return err;
-		}
-	} else {
-		state->list = (struct skiplist *) malloc(sizeof(struct skiplist));
-		if (!state->list) {
-			XNVME_DEBUG("FAILED: could not allocate memory for skiplist");
-			return -ENOMEM;
-		}
+	err = cudaMallocManaged(&state->list, NVM_PAGE_ALIGN(sizeof(struct skiplist), 1 << 16));
+	if (err) {
+		XNVME_DEBUG("FAILED: could not allocate memory for skiplist, err: %d", err);
+		return err;
 	}
 	skiplist_init(state->list);
 
@@ -218,15 +282,14 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 
 	XNVME_DEBUG("page size: %u, admin: %p", state->ctrlr->page_size, admin);
 
-	if (admin->qmem != NULL) {
-		pthread_mutex_init(&admin->mutex, NULL);
+	if (admin->qmem) {
 		pthread_mutex_lock(&admin->mutex);
-
 		err = nvm_aq_share(&state->aq, state->ctrlr, aq_mem, admin);
+		pthread_mutex_unlock(&admin->mutex);
 		state->primary = 0;
 	} else {
-		pthread_mutex_lock(&admin->mutex);
 		err = nvm_aq_create_new(&state->aq, state->ctrlr, aq_mem, admin);
+		pthread_mutex_init(&admin->mutex, NULL);
 		state->primary = 1;
 	}
 
@@ -237,14 +300,6 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		return err;
 	}
 
-	if (gpu_mem) {
-		state->qid = 1;
-		state->qloc = 0;
-	} else {
-		state->qid = 16;
-		state->qloc = 0;
-	}
-
 	err = cudaHostRegister((void*) state->ctrlr->mm_ptr, NVM_CTRL_MEM_MINSIZE, cudaHostRegisterIoMemory);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not map IO memory, err: %d", err);
@@ -252,86 +307,15 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		return err;
 	}
 
-	err = nvm_admin_request_num_queues(state->aq, &n_sqs, &n_cqs);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not reserve I/O queues, err: %d", err);
-		pthread_mutex_unlock(&admin->mutex);
-		return err;
-	}
-
-	n_qps = XNVME_MIN(n_sqs, n_cqs);
-
-	if (gpu_mem) {
-		err = cudaMallocManaged(&state->sq, NVM_PAGE_ALIGN(sizeof(nvm_queue_t) * n_qps, 1 << 16));
-		if (err) {
-			XNVME_DEBUG("FAILED: could not allocate memory for SQ, err: %d", err);
-			pthread_mutex_unlock(&admin->mutex);
-			return err;
-		}
-		err = cudaMallocManaged(&state->cq, NVM_PAGE_ALIGN(sizeof(nvm_queue_t) * n_qps, 1 << 16));
-		if (err) {
-			XNVME_DEBUG("FAILED: could not allocate memory for CQ, err: %d", err);
-			pthread_mutex_unlock(&admin->mutex);
-			return err;
-		}
-
-		state->sq_mem = (nvm_dma_t **) calloc(n_qps, sizeof(nvm_dma_t *));
-		if (!state->sq_mem) {
-			err = errno;
-			XNVME_DEBUG("FAILED: could not allocate memory for SQMEM, err: %d", err);
-			pthread_mutex_unlock(&admin->mutex);
-			return err;
-		}
-
-		state->cq_mem = (nvm_dma_t **) calloc(n_qps, sizeof(nvm_dma_t *));
-		if (!state->cq_mem) {
-			err = errno;
-			XNVME_DEBUG("FAILED: could not allocate memory for CQMEM, err: %d", err);
-			pthread_mutex_unlock(&admin->mutex);
-			return err;
-		}
-	} else {
-		state->sq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t) * n_qps);
-		if (!state->sq) {
-			XNVME_DEBUG("FAILED: could not allocate memory for SQ");
-			pthread_mutex_unlock(&admin->mutex);
-			return -ENOMEM;
-		}
-
-		state->cq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t) * n_qps);
-		if (!state->cq) {
-			XNVME_DEBUG("FAILED: could not allocate memory for CQ");
-			pthread_mutex_unlock(&admin->mutex);
-			return -ENOMEM;
-		}
-	}
-
 	dev->ident.dtype = XNVME_DEV_TYPE_NVME_NAMESPACE;
 	dev->ident.nsid = dev->opts.nsid;
 	dev->ident.csi = XNVME_SPEC_CSI_NVM;
 
-	state->n_qps = n_qps;
-	if (!gpu_mem) {
-		pthread_mutex_unlock(&admin->mutex);
-		return 0;
-	}
-
-	for (int i = 0; i < n_qps; i++) {
-		err = bam_queue_init(state, i);
-		if (err) {
-			XNVME_DEBUG("FAILED: could not allocate QP: %d, err: %d", i, err);
-			return err;
-		}
-	}
-
 	err = cudaHostRegister(dev, sizeof(*dev), cudaHostRegisterDefault);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
-		pthread_mutex_unlock(&admin->mutex);
 		return err;
 	}
-
-	pthread_mutex_unlock(&admin->mutex);
 
 	return 0;
 }
@@ -340,43 +324,10 @@ void
 xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
-	struct local_admin *admin;
-	bool gpu_mem = !strcmp(dev->be.mem.id, "gpu");
-	int err;
-
-	if (gpu_mem) {
-		admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
-		pthread_mutex_lock(&admin->mutex);
-
-		for (int i = 0; i < state->n_qps; i++) {
-			err = xnvme_be_bam_queue_term(state, i);
-			if (err) {
-				pthread_mutex_unlock(&admin->mutex);
-				XNVME_DEBUG("FAILED: could not terminate QP: %d, err: %d", i, err);
-			}
-		}
-
-		pthread_mutex_unlock(&admin->mutex);
-
-		cudaFree(state->sq);
-		cudaFree(state->cq);
-		free(state->sq_mem);
-		free(state->cq_mem);
-	} else {
-		free(state->sq);
-		free(state->cq);
-	}
 
 	nvm_aq_destroy(state->aq);
 	cudaHostUnregister((void *)state->ctrlr->mm_ptr);
-
-	if (gpu_mem) {
-		cudaHostUnregister(state->ctrlr);
-	}
-
-	if (gpu_mem) {
-		cudaHostUnregister(state->ctrlr);
-	}
+	cudaHostUnregister(state->ctrlr);
 
 	if (shmdt(state->buf) < 0) {
 		XNVME_DEBUG("FAILED: could not detach the shared memory segment, for shmid: %d",
@@ -389,9 +340,7 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 	}
 
 	nvm_ctrl_free(state->ctrlr);
-	if (gpu_mem) {
-		cudaHostUnregister(dev);
-	}
+	cudaHostUnregister(dev);
 }
 
 #endif

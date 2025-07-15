@@ -66,16 +66,24 @@ iowork_pp(struct iowork *work)
 static int
 iowork_teardown(struct iowork *work)
 {
-	for (uint32_t i = 0; i < work->n_ranges; i++) {
-		xnvme_buf_free(work->dev, work->rbufs[i]);
-		xnvme_buf_free(work->dev, work->wbufs[i]);
+	int err = 0;
+
+	err = xnvme_gpu_delete_queues(work->dev);
+	if (err) {
+		XNVME_DEBUG("FAILED: xnvme_gpu_delete_queues(), err: %d", err);
 	}
+
+	for (uint32_t i = 0; i < work->n_ranges; i++) {
+		xnvme_gpu_free(work->dev, work->rbufs[i]);
+		xnvme_gpu_free(work->dev, work->wbufs[i]);
+	}
+
 	cudaFree(work->slbas);
 	cudaFree(work->elbas);
 	cudaFree(work->rbufs);
 	cudaFree(work->wbufs);
 
-	return 0;
+	return err;
 }
 
 static int
@@ -97,6 +105,12 @@ iowork_from_cli(struct xnvme_cli *cli, struct iowork *work)
 	work->naddr = work->nbytes / work->geo->lba_nbytes;
 	work->nio = work->n_ranges * work->naddr;
 
+	err = xnvme_gpu_create_queues(cli->args.dev, 1024, 16);
+	if (err) {
+		XNVME_DEBUG("FAILED: xnvme_gpu_create_queues(), err: %d", err);
+		return err;
+	}
+
 	cudaMallocManaged(&work->slbas, sizeof(uint64_t));
 	cudaMallocManaged(&work->elbas, sizeof(uint64_t));
 	cudaMallocManaged(&work->rbufs, sizeof(char *));
@@ -105,18 +119,18 @@ iowork_from_cli(struct xnvme_cli *cli, struct iowork *work)
 	for (uint32_t i = 0; i < work->n_ranges; i++) {
 		work->slbas[i] = i * work->naddr;
 		work->elbas[i] = work->slbas[i] + work->naddr - 1;
-		work->wbufs[i] = (char *) xnvme_buf_alloc(cli->args.dev, work->nbytes);
+		work->wbufs[i] = (char *) xnvme_gpu_alloc(cli->args.dev, work->nbytes);
 		if (!work->wbufs[i]) {
 			err = -errno;
-			XNVME_DEBUG("FAILED: xnvme_buf_alloc(wbuf), err: %d", errno);
+			XNVME_DEBUG("FAILED: xnvme_gpu_alloc(wbuf), err: %d", errno);
 			goto failed;
 		}
 		xnvme_buf_fill(work->wbufs[i], work->nbytes, "rand-t");
 
-		work->rbufs[i] = (char *) xnvme_buf_alloc(cli->args.dev, work->nbytes);
+		work->rbufs[i] = (char *) xnvme_gpu_alloc(cli->args.dev, work->nbytes);
 		if (!work->rbufs[i]) {
 			err = -errno;
-			XNVME_DEBUG("FAILED: xnvme_buf_alloc(rbuf), err: %d", errno);
+			XNVME_DEBUG("FAILED: xnvme_gpu_alloc(rbuf), err: %d", errno);
 			goto failed;
 		}
 		xnvme_buf_fill(work->rbufs[i], work->nbytes, "zero");

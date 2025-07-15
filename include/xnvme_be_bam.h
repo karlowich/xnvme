@@ -30,9 +30,6 @@ extern "C" {
 #include <xnvme_be.h>
 #include <xnvme_queue.h>
 
-#define XNVME_BE_BAM_NQUEUES_MAX 15
-#define XNVME_BE_BAM_QD_MAX      1024
-
 struct xnvme_be_bam_state {
 	nvm_ctrl_t *ctrlr;
 	nvm_admin_reference *aq;
@@ -43,13 +40,13 @@ struct xnvme_be_bam_state {
 
 	struct skiplist *list;
 	void *buf;
-	uint8_t qid;
+	uint16_t qid;
 	uint8_t qloc;
 	simt::atomic<uint64_t, simt::thread_scope_device> queue_counter;
 
 	uint8_t primary;
-	uint8_t n_qps;
-	uint8_t _rvds[52];
+	uint16_t n_qps;
+	uint8_t _rvds[42];
 };
 XNVME_STATIC_ASSERT(sizeof(struct xnvme_be_bam_state) == XNVME_BE_STATE_NBYTES, "Incorrect size")
 
@@ -72,11 +69,16 @@ xnvme_be_bam_gpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes,
 void
 xnvme_be_bam_gpu_buf_free(const struct xnvme_dev *dev, void *buf);
 
+int
+xnvme_be_bam_gpu_delete_queues(struct xnvme_dev *dev);
+
+int
+xnvme_be_bam_gpu_create_queues(struct xnvme_dev *dev, uint16_t qd, uint16_t n_qps);
+
 extern struct xnvme_be_admin g_xnvme_be_bam_admin;
 extern struct xnvme_be_sync g_xnvme_be_bam_sync;
 extern struct xnvme_be_async g_xnvme_be_bam_async;
-extern struct xnvme_be_mem g_xnvme_be_bam_mem_gpu;
-extern struct xnvme_be_mem g_xnvme_be_bam_mem_cpu;
+extern struct xnvme_be_mem g_xnvme_be_bam_mem;
 extern struct xnvme_be_dev g_xnvme_be_bam_dev;
 
 #endif /* __INTERNAL_XNVME_BE_BAM */
