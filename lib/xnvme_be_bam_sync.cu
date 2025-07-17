@@ -10,8 +10,67 @@ extern "C" {
 #include <xnvme_dev.h>
 #include <xnvme_be_bam.h>
 
-__device__ int
+int
 xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes, void *XNVME_UNUSED(mbuf),
+			   size_t XNVME_UNUSED(mbuf_nbytes))
+{
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)ctx->dev->be.state;
+	struct xnvme_queue_bam *queue = (struct xnvme_queue_bam *)state->sync_q;
+	uint32_t cmd_id = ((struct xnvme_cmd_ctx_entry *)ctx)->id;
+	struct xnvme_spec_cpl *cpl;
+	nvm_cmd_t *cmd;
+	nvm_dma_t *mem;
+	int err;
+	uint64_t offset;
+	size_t n_pages;
+	uint16_t prp_list;
+
+	ctx->cmd.common.cid = cmd_id;
+	cmd = nvm_sq_enqueue(queue->sq);
+	if (!cmd) {
+		XNVME_DEBUG("FAILED: couldn't get cmd entry");
+		return -EBUSY;
+	}
+	*cmd = *((nvm_cmd_t *)&ctx->cmd);
+
+	if (dbuf) {
+		err = nvm_dma_map_host(&mem, state->ctrlr, dbuf, dbuf_nbytes);
+		if (err) {
+			XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
+			return -ENOMEM;
+		}
+
+		prp_list = (cmd_id % queue->sq->qs) + 1;
+		offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
+
+		n_pages = dbuf_nbytes / mem->page_size;
+		nvm_cmd_data1(cmd, mem->page_size, n_pages, NVM_DMA_OFFSET(queue->sq_mem, prp_list),
+			queue->sq_mem->ioaddrs[prp_list], &mem->ioaddrs[offset]);
+
+		nvm_dma_unmap(mem);
+	}
+
+	nvm_sq_submit(queue->sq);
+
+	do {
+		cpl = (struct xnvme_spec_cpl *)nvm_cq_dequeue(queue->cq);
+	} while (!cpl);
+
+	nvm_sq_update(queue->sq);
+
+	memcpy(&ctx->cpl, cpl, sizeof(ctx->cpl));
+	nvm_cq_update(queue->cq);
+
+	if (xnvme_cmd_ctx_cpl_status(ctx)) {
+		XNVME_DEBUG("FAILED: xnvme_cmd_ctx_cpl_status(), sct: %d, sc: %d", ctx->cpl.status.sct, ctx->cpl.status.sc);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+__device__ int
+xnvme_be_bam_gpu_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes, void *XNVME_UNUSED(mbuf),
 			   size_t XNVME_UNUSED(mbuf_nbytes))
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)ctx->dev->be.state;

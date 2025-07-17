@@ -21,7 +21,7 @@ _cmd_submit(struct xnvme_dev *dev, uint32_t opc, uint64_t slba, uint64_t elba, u
 
 		void *buf = (char *) dbuf + (cur_slba - slba) * dev->geo.lba_nbytes;
 
-		xnvme_be_bam_sync_cmd_io(&ctx, buf, nbytes, NULL, 0);
+		xnvme_be_bam_gpu_cmd_io(&ctx, buf, nbytes, NULL, 0);
 		i++;
 	}
 }
@@ -66,7 +66,7 @@ _range_submit(struct xnvme_dev *dev, uint32_t opc, uint64_t *slbas, uint32_t nlb
 
 		buf = (char *) dbufs[tid] + offsets[tid] * dev->geo.lba_nbytes;
 
-		xnvme_be_bam_sync_cmd_io(&ctx, buf, nbytes, NULL, 0);
+		xnvme_be_bam_gpu_cmd_io(&ctx, buf, nbytes, NULL, 0);
 		i++;
 	}
 }

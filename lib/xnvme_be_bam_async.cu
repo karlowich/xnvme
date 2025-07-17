@@ -11,19 +11,6 @@ extern "C" {
 #include <xnvme_queue.h>
 #include <xnvme_be_bam.h>
 
-struct xnvme_queue_bam {
-	struct xnvme_queue_base base;
-
-	nvm_queue_t *sq;
-	nvm_queue_t *cq;
-	nvm_dma_t *cq_mem;
-	nvm_dma_t *sq_mem;
-
-	uint8_t _rsvd[200];
-};
-XNVME_STATIC_ASSERT(sizeof(struct xnvme_queue_bam) == XNVME_BE_QUEUE_STATE_NBYTES,
-		    "Incorrect size")
-
 int
 xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 {

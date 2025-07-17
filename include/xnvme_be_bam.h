@@ -39,6 +39,7 @@ struct xnvme_be_bam_state {
 	nvm_dma_t **cq_mem;
 
 	struct skiplist *list;
+	struct xnvme_queue *sync_q;
 	void *buf;
 	uint16_t qid;
 	simt::atomic<uint64_t, simt::thread_scope_device> queue_counter;
@@ -54,12 +55,25 @@ struct xnvme_be_bam_memory {
 	struct skiplist_node list;
 };
 
+struct xnvme_queue_bam {
+	struct xnvme_queue_base base;
+
+	nvm_queue_t *sq;
+	nvm_queue_t *cq;
+	nvm_dma_t *cq_mem;
+	nvm_dma_t *sq_mem;
+
+	uint8_t _rsvd[200];
+};
+XNVME_STATIC_ASSERT(sizeof(struct xnvme_queue_bam) == XNVME_BE_QUEUE_STATE_NBYTES,
+		    "Incorrect size")
+
 __device__ __host__ struct xnvme_be_bam_memory *
 xnvme_be_bam_memory_find(struct xnvme_be_bam_state *state, void *buf);
 
 __device__ int
-xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes,
-			 void *XNVME_UNUSED(mbuf), size_t XNVME_UNUSED(mbuf_nbytes));
+xnvme_be_bam_gpu_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes,
+			void *XNVME_UNUSED(mbuf), size_t XNVME_UNUSED(mbuf_nbytes));
 
 void *
 xnvme_be_bam_gpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes,

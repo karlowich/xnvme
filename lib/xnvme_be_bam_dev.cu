@@ -9,6 +9,7 @@ extern "C" {
 #ifdef XNVME_BE_BAM_ENABLED
 #include <fcntl.h>
 #include <xnvme_dev.h>
+#include <xnvme_queue.h>
 #include <xnvme_be_bam.h>
 
 int g_shmid_shared;
@@ -311,6 +312,12 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 	dev->ident.nsid = dev->opts.nsid;
 	dev->ident.csi = XNVME_SPEC_CSI_NVM;
 
+	err = xnvme_queue_init(dev, 4, 0, &state->sync_q);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not setup sync queue");
+		return err;
+	}
+
 	err = cudaHostRegister(dev, sizeof(*dev), cudaHostRegisterDefault);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
@@ -325,6 +332,7 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
+	xnvme_queue_term(state->sync_q);
 	nvm_aq_destroy(state->aq);
 	cudaHostUnregister((void *)state->ctrlr->mm_ptr);
 	cudaHostUnregister(state->ctrlr);
