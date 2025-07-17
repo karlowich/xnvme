@@ -32,7 +32,7 @@ xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)queue->base.dev->be.state;
 	void *cq_buf, *sq_buf;
 	struct local_admin *admin;
-	int err, qid = state->qid++, qloc = state->qloc++;
+	int err, qid = ++state->qid;
 
 	// Whether the controller requires contiguous phys mem for queues
 	bool contiguous_queues = !!_RB(*_REG(state->ctrlr->mm_ptr, 0x0000, 64), 16, 16);
@@ -81,24 +81,44 @@ xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 	}
 
 	admin = (struct local_admin *)((uint8_t *)state->buf + state->ctrlr->page_size * 3);
+	queue->cq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t));
+	if (!queue->cq) {
+			XNVME_DEBUG("FAILED: could not allocate memory for CQ");
+			nvm_dma_unmap(queue->cq_mem);
+			nvm_dma_unmap(queue->sq_mem);
+			return -ENOMEM;
+	}
+	queue->sq = (nvm_queue_t *) malloc(sizeof(nvm_queue_t));
+	if (!queue->sq) {
+			XNVME_DEBUG("FAILED: could not allocate memory for SQ");
+			nvm_dma_unmap(queue->cq_mem);
+			nvm_dma_unmap(queue->sq_mem);
+			free(queue->cq);
+			return -ENOMEM;
+	}
 	pthread_mutex_lock(&admin->mutex);
-	err = nvm_admin_cq_create(state->aq, &state->cq[qloc], qid, queue->cq_mem, 0, qd, false);
+	err = nvm_admin_cq_create(state->aq, queue->cq, qid, queue->cq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O completion queue, err: %d", err);
 		pthread_mutex_unlock(&admin->mutex);
+		nvm_dma_unmap(queue->cq_mem);
+		nvm_dma_unmap(queue->sq_mem);
+		free(queue->cq);
+		free(queue->sq);
 		return err;
 	}
 
-	err = nvm_admin_sq_create(state->aq, &state->sq[qloc], &state->cq[qloc], qid, queue->sq_mem, 0, qd, false);
+	err = nvm_admin_sq_create(state->aq, queue->sq, queue->cq, qid, queue->sq_mem, 0, qd, false);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not create I/O submission queue, err: %d", err);
 		pthread_mutex_unlock(&admin->mutex);
+		nvm_dma_unmap(queue->cq_mem);
+		nvm_dma_unmap(queue->sq_mem);
+		free(queue->cq);
+		free(queue->sq);
 		return err;
 	}
 	pthread_mutex_unlock(&admin->mutex);
-
-	queue->cq = &state->cq[qloc];
-	queue->sq = &state->sq[qloc];
 
 	return 0;
 }
@@ -130,6 +150,8 @@ xnvme_be_bam_queue_term(struct xnvme_queue *q)
 
 	nvm_dma_unmap(queue->cq_mem);
 	nvm_dma_unmap(queue->sq_mem);
+	free(queue->cq);
+	free(queue->sq);
 	return 0;
 }
 

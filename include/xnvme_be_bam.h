@@ -41,12 +41,11 @@ struct xnvme_be_bam_state {
 	struct skiplist *list;
 	void *buf;
 	uint16_t qid;
-	uint8_t qloc;
 	simt::atomic<uint64_t, simt::thread_scope_device> queue_counter;
 
 	uint8_t primary;
 	uint16_t n_qps;
-	uint8_t _rvds[42];
+	uint8_t _rvds[43];
 };
 XNVME_STATIC_ASSERT(sizeof(struct xnvme_be_bam_state) == XNVME_BE_STATE_NBYTES, "Incorrect size")
 
