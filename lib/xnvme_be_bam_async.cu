@@ -175,6 +175,32 @@ xnvme_be_bam_queue_poke(struct xnvme_queue *queue, uint32_t max)
 	return reaped;
 }
 
+void
+xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, nvm_dma_t *mem, nvm_cmd_t *cmd, uint32_t cmd_id)
+{
+		uint64_t ioaddr, offset, prp1, prp2 = 0;
+		uint16_t prp_offset;
+		uint64_t *prp_list;
+		size_t n_pages;
+
+		ioaddr = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
+		offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) % mem->page_size;
+		n_pages = (dbuf_nbytes + mem->page_size - 1) / mem->page_size;
+		prp1 = mem->ioaddrs[ioaddr] + offset;
+
+		if (n_pages == 2) {
+			prp2 = mem->ioaddrs[ioaddr+1];
+		} else if (n_pages > 2) {
+			prp_offset = (cmd_id % q->sq->qs) + 1;
+			prp_list = (uint64_t *)NVM_DMA_OFFSET(q->sq_mem, prp_offset);
+			prp2 = q->sq_mem->ioaddrs[prp_offset];
+			for (size_t i = 1; i < n_pages; ++i) {
+	      prp_list[i-1] = mem->ioaddrs[ioaddr+i];
+	    }
+		}
+		nvm_cmd_data_ptr(cmd, prp1, prp2);
+}
+
 int
 xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbytes, void *XNVME_UNUSED(mbuf),
 			   size_t XNVME_UNUSED(mbuf_nbytes))
@@ -184,11 +210,7 @@ xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nby
 	uint32_t cmd_id = ((struct xnvme_cmd_ctx_entry *)ctx)->id;
 	struct xnvme_be_bam_memory *m;
 	nvm_cmd_t *cmd;
-	nvm_dma_t *mem;
 	int err;
-	uint64_t offset;
-	size_t n_pages;
-	uint16_t prp_list;
 
 	if (queue->base.outstanding == queue->base.capacity) {
 		XNVME_DEBUG("FAILED: queue is full");
@@ -209,14 +231,7 @@ xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nby
 			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
 			return -ENOENT;
 		}
-		mem = m->mem;
-
-		prp_list = (cmd_id % queue->sq->qs) + 1;
-		offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
-
-		n_pages = dbuf_nbytes / mem->page_size;
-		nvm_cmd_data1(cmd, mem->page_size, n_pages, NVM_DMA_OFFSET(queue->sq_mem, prp_list),
-			queue->sq_mem->ioaddrs[prp_list], &mem->ioaddrs[offset]);
+		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, m->mem, cmd, cmd_id);
 	}
 
 	nvm_sq_submit(queue->sq);

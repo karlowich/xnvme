@@ -20,11 +20,7 @@ xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyt
 	struct xnvme_spec_cpl *cpl;
 	struct xnvme_be_bam_memory *m;
 	nvm_cmd_t *cmd;
-	nvm_dma_t *mem;
 	int err;
-	uint64_t offset;
-	size_t n_pages;
-	uint16_t prp_list;
 
 	ctx->cmd.common.cid = cmd_id;
 	cmd = nvm_sq_enqueue(queue->sq);
@@ -40,14 +36,7 @@ xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyt
 			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
 			return -ENOENT;
 		}
-		mem = m->mem;
-
-		prp_list = (cmd_id % queue->sq->qs) + 1;
-		offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
-
-		n_pages = dbuf_nbytes / mem->page_size;
-		nvm_cmd_data1(cmd, mem->page_size, n_pages, NVM_DMA_OFFSET(queue->sq_mem, prp_list),
-			queue->sq_mem->ioaddrs[prp_list], &mem->ioaddrs[offset]);
+		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, m->mem, cmd, cmd_id);
 	}
 
 	nvm_sq_submit(queue->sq);
