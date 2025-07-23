@@ -39,3 +39,10 @@ xnvme_gpu_io_alloc(struct xnvme_gpu_io **io, uint64_t max_io);
 
 void
 xnvme_gpu_io_free(struct xnvme_gpu_io *io);
+
+int
+xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc,
+		    uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io);
+
+int
+xnvme_gpu_sync(void);

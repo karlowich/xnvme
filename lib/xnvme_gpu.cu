@@ -3,6 +3,8 @@
 #include <xnvme_dev.h>
 #include <xnvme_be_bam.h>
 
+#define XNVME_GPU_MAX_NBYTES 4096
+
 __global__ void
 _cmd_submit(struct xnvme_dev *dev, uint32_t opc, uint64_t slba, uint64_t elba, uint32_t nlb, uint64_t nbytes, void *dbuf, uint32_t n_threads)
 {
@@ -31,6 +33,10 @@ int
 xnvme_gpu_cmd_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint64_t slba, uint64_t elba, uint32_t nlb, uint64_t nbytes, void *dbuf)
 {
 	cudaError_t err;
+	if(nbytes > XNVME_GPU_MAX_NBYTES) {
+		XNVME_DEBUG("IO sizes beyond 4096 are unsupported");
+		return -EINVAL;
+	}
 	_cmd_submit<<<grid_size, tblock_size>>>(dev, opc, slba, elba, nlb, nbytes, dbuf, grid_size * tblock_size);
 	err = cudaGetLastError();
 	if (err != cudaSuccess) {
@@ -76,11 +82,16 @@ int
 xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint64_t *slbas, uint64_t *elbas, uint32_t nlb, uint64_t nbytes, void **dbufs, uint32_t n_ranges)
 {
 	struct xnvme_gpu_io *io;
-	cudaError_t cerr;
 	uint32_t n_io = 0;
 	uint32_t range = 0;
 	uint32_t offset = 0;
-	int err;
+	cudaError_t cerr;
+	int err = 0;
+
+	if(nbytes > XNVME_GPU_MAX_NBYTES) {
+		XNVME_DEBUG("IO sizes beyond 4096 are unsupported");
+		return -EINVAL;
+	}
 
 	for (uint32_t i = 0; i < n_ranges; i++) {
 		n_io += ((elbas[i] - slbas[i]) + 1) / (nlb + 1);
@@ -107,17 +118,40 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 	cerr = cudaGetLastError();
 	if (cerr != cudaSuccess) {
 		XNVME_DEBUG("Error launching kernel: %s", cudaGetErrorString(cerr));
-		return cerr;
-	}
-	cerr = cudaDeviceSynchronize();
-	if (cerr != cudaSuccess) {
-		XNVME_DEBUG("Error synchronizing: %s", cudaGetErrorString(cerr));
-		return cerr;
+		err = cerr;
+		goto exit;
 	}
 
+	err = xnvme_gpu_sync();
+	if (err) {
+		XNVME_DEBUG("xnvme_gpu_sync: %d", err);
+		goto exit;
+	}
+
+exit:
 	xnvme_gpu_io_free(io);
 
-	return 0;
+	return err;
+}
+
+
+int
+xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io)
+{
+	cudaError_t err;
+
+	if(nbytes > XNVME_GPU_MAX_NBYTES) {
+		XNVME_DEBUG("IO sizes beyond 4096 are unsupported");
+		return -EINVAL;
+	}
+
+	_range_submit<<<grid_size, tblock_size>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, io->n_io, grid_size * tblock_size);
+
+	err = cudaGetLastError();
+	if (err != cudaSuccess) {
+		XNVME_DEBUG("Error launching kernel: %s", cudaGetErrorString(err));
+	}
+	return err;
 }
 
 void *
@@ -190,4 +224,15 @@ xnvme_gpu_io_free(struct xnvme_gpu_io *io) {
 	cudaFree(io->offsets);
 	cudaFree(io->slbas);
 	free(io);
+}
+
+int
+xnvme_gpu_sync() {
+	cudaError_t err;
+	err = cudaDeviceSynchronize();
+	if (err != cudaSuccess) {
+		XNVME_DEBUG("Error synchronizing: %s", cudaGetErrorString(err));
+		return err;
+	}
+	return 0;
 }

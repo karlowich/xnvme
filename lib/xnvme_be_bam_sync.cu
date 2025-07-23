@@ -82,27 +82,17 @@ xnvme_be_bam_gpu_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyte
 	ctx->cmd.common.cid = cid;
 	cmd = (nvm_cmd_t *) &ctx->cmd;
 
-	if (dbuf) {
-		m = xnvme_be_bam_memory_find(state, dbuf);
-		if (!m) {
-			return -ENOENT;
-		}
-
-		if (dbuf_nbytes > state->ctrlr->page_size * 2) {
-			return -EINVAL;
-		}
-
-		offset = ((uint64_t)dbuf - (uint64_t)m->mem->vaddr)/m->mem->page_size;
-		remainder = (((uint64_t)dbuf - (uint64_t)m->mem->vaddr)%m->mem->page_size);
-		ioaddrs = m->mem->ioaddrs;
-		prp1 = ioaddrs[offset] + remainder;
-
-		if (dbuf_nbytes > m->mem->page_size) {
-			prp2 = prp1 + m->mem->page_size;
-		}
-
-		nvm_cmd_data_ptr(cmd, prp1, prp2);
+	m = xnvme_be_bam_memory_find(state, dbuf);
+	if (!m) {
+		return -ENOENT;
 	}
+
+	offset = ((uint64_t)dbuf - (uint64_t)m->mem->vaddr)/m->mem->page_size;
+	remainder = (((uint64_t)dbuf - (uint64_t)m->mem->vaddr)%m->mem->page_size);
+	ioaddrs = m->mem->ioaddrs;
+	prp1 = ioaddrs[offset] + remainder;
+
+	nvm_cmd_data_ptr(cmd, prp1, prp2);
 
 	sq_enqueue(sq, cmd);
 	pos = cq_poll(cq, cid, &head, &head_);

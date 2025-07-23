@@ -123,6 +123,8 @@
 		xnvme_gpu_delete_queues;
 		xnvme_gpu_io_alloc;
 		xnvme_gpu_io_free;
+		xnvme_gpu_io_submit;
+		xnvme_gpu_sync;
 
 		# libxnvme_ident.h
 		xnvme_ident;
