@@ -121,6 +121,8 @@
 		xnvme_gpu_free;
 		xnvme_gpu_create_queues;
 		xnvme_gpu_delete_queues;
+		xnvme_gpu_io_alloc;
+		xnvme_gpu_io_free;
 
 		# libxnvme_ident.h
 		xnvme_ident;

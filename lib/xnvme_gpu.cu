@@ -1,3 +1,4 @@
+#include "libxnvme.h"
 #include <xnvme_cmd.h>
 #include <xnvme_dev.h>
 #include <xnvme_be_bam.h>
@@ -74,37 +75,27 @@ _range_submit(struct xnvme_dev *dev, uint32_t opc, uint64_t *slbas, uint32_t nlb
 int
 xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint64_t *slbas, uint64_t *elbas, uint32_t nlb, uint64_t nbytes, void **dbufs, uint32_t n_ranges)
 {
-	cudaError_t err;
-	uint64_t *gpu_slbas;
-	uint32_t *offsets;
-	void **buffers;
+	struct xnvme_gpu_io *io;
+	cudaError_t cerr;
 	uint32_t n_io = 0;
 	uint32_t range = 0;
 	uint32_t offset = 0;
+	int err;
 
 	for (uint32_t i = 0; i < n_ranges; i++) {
 		n_io += ((elbas[i] - slbas[i]) + 1) / (nlb + 1);
 	}
 
-	err = cudaMallocManaged(&gpu_slbas, n_io * sizeof(uint64_t));
-	if (err != cudaSuccess) {
-		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(err));
-	}
-
-	err = cudaMallocManaged(&offsets, n_io * sizeof(uint32_t));
-	if (err != cudaSuccess) {
-		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(err));
-	}
-
-	err = cudaMallocManaged(&buffers, n_io * sizeof(void *));
-	if (err != cudaSuccess) {
-		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(err));
+	err = xnvme_gpu_io_alloc(&io, n_io);	
+	if (err) {
+		XNVME_DEBUG("Error allocating struct xnvme_gpu_io: %d", err);
+		return err;
 	}
 
 	for (uint32_t i = 0; i < n_io; i++) {
-		gpu_slbas[i] = slbas[range] + offset;
-		offsets[i] = offset;
-		buffers[i] = dbufs[range];
+		io->slbas[i] = slbas[range] + offset;
+		io->offsets[i] = offset;
+		io->buffers[i] = dbufs[range];
 		offset += nlb + 1;
 		if (slbas[range] + offset > elbas[range]) {
 			range++;
@@ -112,17 +103,19 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 		}
 	}
 
-	_range_submit<<<grid_size, tblock_size>>>(dev, opc, gpu_slbas, nlb, nbytes, buffers, offsets, n_io, grid_size * tblock_size);
-	err = cudaGetLastError();
-	if (err != cudaSuccess) {
-		XNVME_DEBUG("Error launching kernel: %s", cudaGetErrorString(err));
-		return err;
+	_range_submit<<<grid_size, tblock_size>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, n_io, grid_size * tblock_size);
+	cerr = cudaGetLastError();
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error launching kernel: %s", cudaGetErrorString(cerr));
+		return cerr;
 	}
-	err = cudaDeviceSynchronize();
-	if (err != cudaSuccess) {
-		XNVME_DEBUG("Error synchronizing: %s", cudaGetErrorString(err));
-		return err;
+	cerr = cudaDeviceSynchronize();
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error synchronizing: %s", cudaGetErrorString(cerr));
+		return cerr;
 	}
+
+	xnvme_gpu_io_free(io);
 
 	return 0;
 }
@@ -150,4 +143,51 @@ int
 xnvme_gpu_delete_queues(struct xnvme_dev *dev)
 {
 	return xnvme_be_bam_gpu_delete_queues(dev);
+}
+
+int
+xnvme_gpu_io_alloc(struct xnvme_gpu_io **io, uint64_t max_io) {
+	struct xnvme_gpu_io *_io;
+	cudaError_t cerr;
+	int err;
+
+	_io = (struct xnvme_gpu_io *) malloc(sizeof(struct xnvme_gpu_io));
+	if (!_io) {
+		err = errno;
+		XNVME_DEBUG("Error allocating memory: %d", err);
+		return err;
+	}
+
+	cerr = cudaMallocManaged(&_io->slbas, max_io * sizeof(uint64_t));
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(cerr));
+		return cerr;
+	}
+
+	cerr = cudaMallocManaged(&_io->offsets, max_io * sizeof(uint32_t));
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(cerr));
+		cudaFree(_io->slbas);
+		return cerr;
+	}
+
+	cerr = cudaMallocManaged(&_io->buffers, max_io * sizeof(void *));
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(cerr));
+		cudaFree(_io->slbas);
+		cudaFree(_io->offsets);
+		return cerr;
+	}
+	_io->max_io = max_io;
+
+	*io = _io;
+	return 0;
+}
+
+void
+xnvme_gpu_io_free(struct xnvme_gpu_io *io) {
+	cudaFree(io->buffers);
+	cudaFree(io->offsets);
+	cudaFree(io->slbas);
+	free(io);
 }
