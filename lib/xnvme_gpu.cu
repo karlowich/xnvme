@@ -139,13 +139,14 @@ int
 xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io)
 {
 	cudaError_t err;
+	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
 	if(nbytes > XNVME_GPU_MAX_NBYTES) {
 		XNVME_DEBUG("IO sizes beyond 4096 are unsupported");
 		return -EINVAL;
 	}
 
-	_range_submit<<<grid_size, tblock_size>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, io->n_io, grid_size * tblock_size);
+	_range_submit<<<grid_size, tblock_size, 0, state->stream>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, io->n_io, grid_size * tblock_size);
 
 	err = cudaGetLastError();
 	if (err != cudaSuccess) {

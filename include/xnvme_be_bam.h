@@ -37,6 +37,7 @@ struct xnvme_be_bam_state {
 	nvm_queue_t *cq;
 	nvm_dma_t **sq_mem;
 	nvm_dma_t **cq_mem;
+	cudaStream_t stream;
 
 	struct skiplist *list;
 	struct xnvme_queue *sync_q;
@@ -46,7 +47,7 @@ struct xnvme_be_bam_state {
 
 	uint8_t primary;
 	uint16_t n_qps;
-	uint8_t _rvds[43];
+	uint8_t _rvds[35];
 };
 XNVME_STATIC_ASSERT(sizeof(struct xnvme_be_bam_state) == XNVME_BE_STATE_NBYTES, "Incorrect size")
 
