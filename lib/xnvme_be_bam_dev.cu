@@ -226,7 +226,7 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 	const struct xnvme_ident *ident = &dev->ident;
 	nvm_dma_t *aq_mem;
 	void *buf;
-	int fd, err;
+	int fd, devid, err;
 	struct local_admin *admin;
 
 	fd = open(ident->uri, O_RDWR);
@@ -256,7 +256,8 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 	}
 	skiplist_init(state->list);
 
-	g_shmid_shared = shmget(SHM_KEY, state->ctrlr->page_size * 3 + sizeof(struct local_admin), IPC_CREAT | 0666);
+	devid = ident->uri[strlen(ident->uri)-1] - '0';
+	g_shmid_shared = shmget(SHM_KEY + devid, state->ctrlr->page_size * 3 + sizeof(struct local_admin), IPC_CREAT | 0666);
 	if (g_shmid_shared < 0) {
 		XNVME_DEBUG("FAILED: could not get shmid for shmd, err: %d", g_shmid_shared);
 		return err;
