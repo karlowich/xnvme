@@ -7,6 +7,7 @@
  */
 
 struct xnvme_gpu_io {
+	struct xnvme_dev **devs;
 	void **buffers;
 	uint64_t *slbas;
 	uint32_t *offsets;
@@ -41,8 +42,8 @@ void
 xnvme_gpu_io_free(struct xnvme_gpu_io *io);
 
 int
-xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc,
-		    uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io);
+xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, uint32_t opc, uint32_t nlb,
+		    uint64_t nbytes, struct xnvme_gpu_io *io);
 
 int
 xnvme_gpu_sync(void);

@@ -53,19 +53,20 @@ xnvme_gpu_cmd_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev 
 }
 
 __global__ void
-_range_submit(struct xnvme_dev *dev, uint32_t opc, uint64_t *slbas, uint32_t nlb, uint64_t nbytes, void **dbufs, uint32_t *offsets, uint32_t n_io, uint32_t n_threads)
+_range_submit(struct xnvme_dev **devs, uint32_t opc, uint64_t *slbas, uint32_t nlb, uint64_t nbytes, void **dbufs, uint32_t *offsets, uint32_t n_io, uint32_t n_threads)
 {
 	void *buf;
 	uint64_t tid;
+	struct xnvme_dev *dev;
 	uint64_t i = 0;
 	while(true) {
-		struct xnvme_cmd_ctx ctx = {.dev = dev, .opts = XNVME_CMD_SYNC};
 		tid = blockIdx.x * blockDim.x + threadIdx.x + i*n_threads;
-
 		if (tid >= n_io) {
-			return;
+					return;
 		}
 
+		dev = devs[tid];
+		struct xnvme_cmd_ctx ctx = {.dev = dev, .opts = XNVME_CMD_SYNC};
 		ctx.cmd.common.nsid = dev->ident.nsid;
 		ctx.cmd.common.opcode = opc;
 		ctx.cmd.nvm.nlb = nlb;
@@ -97,7 +98,7 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 		n_io += ((elbas[i] - slbas[i]) + 1) / (nlb + 1);
 	}
 
-	err = xnvme_gpu_io_alloc(&io, n_io);	
+	err = xnvme_gpu_io_alloc(&io, n_io);
 	if (err) {
 		XNVME_DEBUG("Error allocating struct xnvme_gpu_io: %d", err);
 		return err;
@@ -107,6 +108,7 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 		io->slbas[i] = slbas[range] + offset;
 		io->offsets[i] = offset;
 		io->buffers[i] = dbufs[range];
+		io->devs[i] = dev;
 		offset += nlb + 1;
 		if (slbas[range] + offset > elbas[range]) {
 			range++;
@@ -114,7 +116,7 @@ xnvme_gpu_range_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_de
 		}
 	}
 
-	_range_submit<<<grid_size, tblock_size>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, n_io, grid_size * tblock_size);
+	_range_submit<<<grid_size, tblock_size>>>(io->devs, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, n_io, grid_size * tblock_size);
 	cerr = cudaGetLastError();
 	if (cerr != cudaSuccess) {
 		XNVME_DEBUG("Error launching kernel: %s", cudaGetErrorString(cerr));
@@ -136,17 +138,16 @@ exit:
 
 
 int
-xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, struct xnvme_dev *dev, uint32_t opc, uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io)
+xnvme_gpu_io_submit(uint32_t grid_size, uint32_t tblock_size, uint32_t opc, uint32_t nlb, uint64_t nbytes, struct xnvme_gpu_io *io)
 {
 	cudaError_t err;
-	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
 	if(nbytes > XNVME_GPU_MAX_NBYTES) {
 		XNVME_DEBUG("IO sizes beyond 4096 are unsupported");
 		return -EINVAL;
 	}
 
-	_range_submit<<<grid_size, tblock_size, 0, state->stream>>>(dev, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, io->n_io, grid_size * tblock_size);
+	_range_submit<<<grid_size, tblock_size>>>(io->devs, opc, io->slbas, nlb, nbytes, io->buffers, io->offsets, io->n_io, grid_size * tblock_size);
 
 	err = cudaGetLastError();
 	if (err != cudaSuccess) {
@@ -193,6 +194,12 @@ xnvme_gpu_io_alloc(struct xnvme_gpu_io **io, uint64_t max_io) {
 		return err;
 	}
 
+	cerr = cudaMallocManaged(&_io->devs, max_io * sizeof(struct xnvme_dev *));
+	if (cerr != cudaSuccess) {
+		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(cerr));
+		return cerr;
+	}
+
 	cerr = cudaMallocManaged(&_io->slbas, max_io * sizeof(uint64_t));
 	if (cerr != cudaSuccess) {
 		XNVME_DEBUG("Error allocating memory: %s", cudaGetErrorString(cerr));
@@ -221,6 +228,9 @@ xnvme_gpu_io_alloc(struct xnvme_gpu_io **io, uint64_t max_io) {
 
 void
 xnvme_gpu_io_free(struct xnvme_gpu_io *io) {
+	if(!io) {
+		return;
+	}
 	cudaFree(io->buffers);
 	cudaFree(io->offsets);
 	cudaFree(io->slbas);
