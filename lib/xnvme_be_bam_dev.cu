@@ -340,6 +340,7 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
 	xnvme_queue_term(state->sync_q);
+	skiplist_term(state->list, xnvme_be_bam_cpu_dma_unmap);
 	nvm_aq_destroy(state->aq);
 	cudaHostUnregister((void *)state->ctrlr->mm_ptr);
 	cudaHostUnregister(state->ctrlr);

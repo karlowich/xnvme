@@ -48,3 +48,4 @@ void skiplist_link(struct skiplist *list, struct skiplist_node *n,
 		   struct skiplist_node *update[SKIPLIST_LEVELS]);
 void skiplist_erase(struct skiplist *list, struct skiplist_node *n,
 		    struct skiplist_node *update[SKIPLIST_LEVELS]);
+void skiplist_term(struct skiplist *list, void (*term)(struct skiplist_node *n));

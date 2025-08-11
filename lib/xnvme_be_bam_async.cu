@@ -228,8 +228,12 @@ xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nby
 	if (dbuf) {
 		m = xnvme_be_bam_memory_find(state, dbuf);
 		if (!m) {
-			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
-			return -ENOENT;
+			XNVME_DEBUG("WARNING: couldn't find memory in skiplist, creating new mapping");
+			err = xnvme_be_bam_cpu_dma_map(state, &m, dbuf, dbuf_nbytes);
+			if (err) {
+				XNVME_DEBUG("FAILED: couldn't create dma mapping, err: %d", err);
+				return err;
+			}
 		}
 		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, m->mem, cmd, cmd_id);
 	}

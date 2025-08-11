@@ -66,6 +66,24 @@ skiplist_find(struct skiplist *list, const void *key,
 	return NULL;
 }
 
+void
+skiplist_term(struct skiplist *list, void (*term)(struct skiplist_node *n))
+{
+	struct skiplist_node *n, *next;
+
+	for (int k = list->height; k >= 0; k--) {
+		n = skiplist_next(list, &list->sentinel, k);
+		while (n != NULL && n != &list->sentinel) {
+			next = skiplist_next(list, n, k);
+			skiplist_del_from(list, n, k);
+			if (k == 0) {
+				term(n);
+			}
+			n = next;
+		}
+	}
+}
+
 static inline int
 __skiplist_random_level(void)
 {

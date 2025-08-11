@@ -93,6 +93,13 @@ void
 xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, nvm_dma_t *mem,
 		      nvm_cmd_t *cmd, uint32_t cmd_id);
 
+int
+xnvme_be_bam_cpu_dma_map(struct xnvme_be_bam_state *state, struct xnvme_be_bam_memory **m,
+			 void *buf, size_t nbytes);
+
+void
+xnvme_be_bam_cpu_dma_unmap(struct skiplist_node *n);
+
 extern struct xnvme_be_admin g_xnvme_be_bam_admin;
 extern struct xnvme_be_sync g_xnvme_be_bam_sync;
 extern struct xnvme_be_async g_xnvme_be_bam_async;
