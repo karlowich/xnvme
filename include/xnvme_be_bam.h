@@ -103,7 +103,8 @@ xnvme_be_bam_cpu_dma_unmap(struct skiplist_node *n);
 extern struct xnvme_be_admin g_xnvme_be_bam_admin;
 extern struct xnvme_be_sync g_xnvme_be_bam_sync;
 extern struct xnvme_be_async g_xnvme_be_bam_async;
-extern struct xnvme_be_mem g_xnvme_be_bam_mem;
+extern struct xnvme_be_mem g_xnvme_be_cpu_mem;
+extern struct xnvme_be_mem g_xnvme_be_gpu_mem;
 extern struct xnvme_be_dev g_xnvme_be_bam_dev;
 
 #endif /* __INTERNAL_XNVME_BE_BAM */

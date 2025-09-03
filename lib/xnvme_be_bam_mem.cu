@@ -210,7 +210,7 @@ xnvme_be_bam_cpu_buf_free(const struct xnvme_dev *dev, void *buf)
 }
 #endif
 
-struct xnvme_be_mem g_xnvme_be_bam_mem = {
+struct xnvme_be_mem g_xnvme_be_cpu_mem = {
 #ifdef XNVME_BE_BAM_ENABLED
 	.buf_alloc = xnvme_be_bam_cpu_buf_alloc,
 	.buf_vtophys = xnvme_be_nosys_buf_vtophys,
@@ -226,5 +226,24 @@ struct xnvme_be_mem g_xnvme_be_bam_mem = {
 	.mem_map = xnvme_be_nosys_mem_map,
 	.mem_unmap = xnvme_be_nosys_mem_unmap,
 #endif
-	.id = "bam",
+	.id = "cpu",
+};
+
+struct xnvme_be_mem g_xnvme_be_gpu_mem = {
+#ifdef XNVME_BE_BAM_ENABLED
+	.buf_alloc = xnvme_be_bam_gpu_buf_alloc,
+	.buf_vtophys = xnvme_be_nosys_buf_vtophys,
+	.buf_realloc = xnvme_be_nosys_buf_realloc,
+	.buf_free = xnvme_be_bam_gpu_buf_free,
+	.mem_map = xnvme_be_nosys_mem_map,
+	.mem_unmap = xnvme_be_nosys_mem_unmap,
+#else
+	.buf_alloc = xnvme_be_nosys_buf_alloc,
+	.buf_vtophys = xnvme_be_nosys_buf_vtophys,
+	.buf_realloc = xnvme_be_nosys_buf_realloc,
+	.buf_free = xnvme_be_nosys_buf_free,
+	.mem_map = xnvme_be_nosys_mem_map,
+	.mem_unmap = xnvme_be_nosys_mem_unmap,
+#endif
+	.id = "gpu",
 };
