@@ -319,12 +319,6 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		return err;
 	}
 
-	err = cudaStreamCreate(&state->stream);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not create cuda stream, err: %d", err);
-		return err;
-	}
-
 	err = cudaHostRegister(dev, sizeof(*dev), cudaHostRegisterDefault);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
@@ -344,7 +338,6 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 	nvm_aq_destroy(state->aq);
 	cudaHostUnregister((void *)state->ctrlr->mm_ptr);
 	cudaHostUnregister(state->ctrlr);
-	cudaStreamDestroy(state->stream);
 
 	if (shmdt(state->buf) < 0) {
 		XNVME_DEBUG("FAILED: could not detach the shared memory segment, for shmid: %d",

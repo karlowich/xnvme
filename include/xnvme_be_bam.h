@@ -37,7 +37,6 @@ struct xnvme_be_bam_state {
 	nvm_queue_t *cq;
 	nvm_dma_t **sq_mem;
 	nvm_dma_t **cq_mem;
-	cudaStream_t stream;
 
 	struct skiplist *list;
 	struct xnvme_queue *sync_q;
