@@ -224,6 +224,7 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	const struct xnvme_ident *ident = &dev->ident;
+	CUdevice cu_dev;
 	nvm_dma_t *aq_mem;
 	void *buf;
 	int fd, devid, err;
@@ -325,6 +326,24 @@ xnvme_be_bam_dev_open(struct xnvme_dev *dev)
 		return err;
 	}
 
+  err = cuInit(0);
+  if (err) {
+    XNVME_DEBUG("FAILED: could not initialize CUDA, err: %d", err);
+    return err;
+  }
+
+  err = cuDeviceGet(&cu_dev, 0); // GPU ID 0
+  if (err) {
+    XNVME_DEBUG("FAILED: could not get CUDA Device, err: %d", err);
+    return err;
+  }
+
+  err = cuCtxCreate(&state->cu_ctx, 0, cu_dev);
+  if (err) {
+    printf("FAILED: could not create CUDA Context, err: %d", err);
+    return err;
+  }
+
 	return 0;
 }
 
@@ -334,7 +353,6 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 
 	xnvme_queue_term(state->sync_q);
-	skiplist_term(state->list, xnvme_be_bam_cpu_dma_unmap);
 	nvm_aq_destroy(state->aq);
 	cudaHostUnregister((void *)state->ctrlr->mm_ptr);
 	cudaHostUnregister(state->ctrlr);
@@ -351,6 +369,8 @@ xnvme_be_bam_dev_close(struct xnvme_dev *dev)
 
 	nvm_ctrl_free(state->ctrlr);
 	cudaHostUnregister(dev);
+
+	cuCtxDestroy(state->cu_ctx);
 }
 
 #endif

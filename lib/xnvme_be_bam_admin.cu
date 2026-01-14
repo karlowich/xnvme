@@ -16,16 +16,16 @@ xnvme_be_bam_sync_cmd_admin(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_n
 			     void *XNVME_UNUSED(mbuf), size_t XNVME_UNUSED(mbuf_nbytes))
 {
 	struct xnvme_be_bam_state *state = (xnvme_be_bam_state *)ctx->dev->be.state;
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 	struct local_admin *admin;
 	nvm_cmd_t *cmd = (nvm_cmd_t *)&ctx->cmd;
 	nvm_cpl_t *cpl = (nvm_cpl_t *)&ctx->cpl;
-	uint64_t offset, remainder, prp1, prp2;
+	uint64_t addr, offset, prp1, prp2 = 0;
 	int err;
 
 	if (dbuf) {
-		m = xnvme_be_bam_memory_find(state, dbuf);
-		if (!m) {
+		mem = xnvme_be_bam_memory_find(state, dbuf);
+		if (!mem) {
 			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
 			return -ENOENT;
 		}
@@ -35,9 +35,9 @@ xnvme_be_bam_sync_cmd_admin(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_n
 			return -EINVAL;
 		}
 
-		offset = ((uint64_t)dbuf - (uint64_t)m->mem->vaddr)/m->mem->page_size;
-		remainder = (((uint64_t)dbuf - (uint64_t)m->mem->vaddr)%m->mem->page_size);
-		prp1 = m->mem->ioaddrs[offset] + remainder;
+		addr = ((uint64_t)dbuf - (uint64_t)mem->vaddr)/mem->page_size;
+		offset = (((uint64_t)dbuf - (uint64_t)mem->vaddr)%mem->page_size);
+		prp1 = mem->addrs[addr] + offset;
 		if (dbuf_nbytes > state->ctrlr->page_size) {
 			prp2 = prp1 + state->ctrlr->page_size;
 		}

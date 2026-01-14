@@ -18,9 +18,8 @@ xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyt
 	struct xnvme_queue_bam *queue = (struct xnvme_queue_bam *)state->sync_q;
 	uint32_t cmd_id = ((struct xnvme_cmd_ctx_entry *)ctx)->id;
 	struct xnvme_spec_cpl *cpl;
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 	nvm_cmd_t *cmd;
-	int err;
 
 	ctx->cmd.common.cid = cmd_id;
 	cmd = nvm_sq_enqueue(queue->sq);
@@ -31,16 +30,12 @@ xnvme_be_bam_sync_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyt
 	*cmd = *((nvm_cmd_t *)&ctx->cmd);
 
 	if (dbuf) {
-		m = xnvme_be_bam_memory_find(state, dbuf);
-		if (!m) {
-			XNVME_DEBUG("WARNING: couldn't find memory in skiplist, creating new mapping");
-			err = xnvme_be_bam_cpu_dma_map(state, &m, dbuf, dbuf_nbytes);
-			if (err) {
-				XNVME_DEBUG("FAILED: couldn't create dma mapping, err: %d", err);
-				return err;
-			}
+		mem = xnvme_be_bam_memory_find(state, dbuf);
+		if (!mem) {
+			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
+			return -ENOENT;
 		}
-		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, m->mem, cmd, cmd_id);
+		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, mem, cmd, cmd_id);
 	}
 
 	nvm_sq_submit(queue->sq);
@@ -67,12 +62,11 @@ xnvme_be_bam_gpu_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyte
 			   size_t XNVME_UNUSED(mbuf_nbytes))
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)ctx->dev->be.state;
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 	nvm_queue_t *sq, *cq;
 	nvm_cmd_t *cmd;
-	uint64_t *ioaddrs;
 	uint32_t pos, qid, cid, head, head_;
-	uint64_t offset, remainder, prp1, prp2 = 0;
+	uint64_t addr, offset, prp1, prp2 = 0;
 
 	if (lane_id() == 0) {
 		qid = state->queue_counter.fetch_add(1, simt::memory_order_relaxed) % state->n_qps;
@@ -86,15 +80,14 @@ xnvme_be_bam_gpu_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nbyte
 	ctx->cmd.common.cid = cid;
 	cmd = (nvm_cmd_t *) &ctx->cmd;
 
-	m = xnvme_be_bam_memory_find(state, dbuf);
-	if (!m) {
+	mem = xnvme_be_bam_memory_find(state, dbuf);
+	if (!mem) {
 		return -ENOENT;
 	}
 
-	offset = ((uint64_t)dbuf - (uint64_t)m->mem->vaddr)/m->mem->page_size;
-	remainder = (((uint64_t)dbuf - (uint64_t)m->mem->vaddr)%m->mem->page_size);
-	ioaddrs = m->mem->ioaddrs;
-	prp1 = ioaddrs[offset] + remainder;
+	addr = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
+	offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) % mem->page_size;
+	prp1 = mem->addrs[addr] + offset;
 
 	nvm_cmd_data_ptr(cmd, prp1, prp2);
 

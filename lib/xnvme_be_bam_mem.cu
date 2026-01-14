@@ -8,6 +8,9 @@ extern "C" {
 }
 #ifdef XNVME_BE_BAM_ENABLED
 #include <errno.h>
+#include <linux/dma-buf.h>
+#include <linux/udmabuf.h>
+#include <sys/ioctl.h>
 #include <xnvme_be_bam.h>
 #include <xnvme_dev.h>
 
@@ -17,11 +20,11 @@ _cmp(const void *vaddr, const struct skiplist_node *n)
 {
 	struct xnvme_be_bam_memory *m = container_of(n, struct xnvme_be_bam_memory, list);
 	uint64_t a = (uint64_t) vaddr;
-	uint64_t b = (uint64_t) m->mem->vaddr;
+	uint64_t b = (uint64_t) m->vaddr;
 
 	if (a < b)
 		return -1;
-	else if (a >= b + m->mem->n_ioaddrs*m->mem->page_size)
+	else if (a >= b + m->n_addrs*m->page_size)
 		return 1;
 
 	return 0;
@@ -33,59 +36,141 @@ xnvme_be_bam_memory_find(struct xnvme_be_bam_state *state, void *buf)
 	return container_of_or_null(skiplist_find(state->list, buf, _cmp, NULL), struct xnvme_be_bam_memory, list);
 }
 
+static int
+xnvme_be_bam_dmabuf_detach(xnvme_be_bam_memory *mem) {
+	int udmabuf_fd, err;
+
+  udmabuf_fd = open("/dev/udmabuf", O_RDWR);
+  if (udmabuf_fd < 0) {
+		err = -errno;
+    XNVME_DEBUG("FAILED: could not open udmabuf dev, errno: %d", err);
+    return err;
+  }
+
+  err = ioctl(udmabuf_fd, UDMABUF_DETACH, &mem->dmabuf_fd);
+  if (err) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: IOCTL UDMABUF_DETACH, errno: %d\n", err);
+    return err;
+  }
+
+  close(udmabuf_fd);
+  return 0;
+}
+
+static int
+xnvme_be_bam_dmabuf_attach(xnvme_be_bam_memory *mem) {
+  struct udmabuf_attach attach;
+  struct udmabuf_get_map *map;
+	int udmabuf_fd, err, i = 0;
+	size_t map_size;
+
+  udmabuf_fd = open("/dev/udmabuf", O_RDWR);
+  if (udmabuf_fd < 0) {
+		err = -errno;
+    XNVME_DEBUG("FAILED: could not open udmabuf dev, errno: %d", err);
+    return err;
+  }
+
+  memset(&attach, 0, sizeof(attach));
+  attach.fd = mem->dmabuf_fd;
+
+  err = ioctl(udmabuf_fd, UDMABUF_ATTACH, &attach);
+  if (err) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: IOCTL UDMABUF_ATTACH, errno: %d\n", err);
+    goto exit;
+  }
+
+  map_size = attach.count * sizeof(struct udmabuf_dma_map);
+
+  map = (udmabuf_get_map *) malloc(sizeof(struct udmabuf_get_map) + map_size);
+  if (!map) {
+		err = -errno;
+    XNVME_DEBUG("FAILED: could not to alloc get_map struct, errno: %d", err);
+    goto exit;
+  }
+  memset(map, 0, sizeof(*map));
+
+  map->fd = mem->dmabuf_fd;
+  map->count = attach.count;
+
+  err = ioctl(udmabuf_fd, UDMABUF_GET_MAP, map);
+  if (err) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: IOCTL UDMABUF_GET_MAP, errno: %d\n", err);
+    goto exit;
+  }
+
+  for (uint32_t j = 0; j < map->count; j++) {
+		// handle a single address for multiple pages
+		for (uint64_t k = 0; k < map->dma_arr[j].dma_len / mem->page_size; k++) {
+	    mem->addrs[i] = map->dma_arr[j].dma_addr + k * mem->page_size;
+	    i++;
+		}
+  }
+
+exit:
+  free(map);
+  close(udmabuf_fd);
+
+	return err;
+}
+
 void *
 xnvme_be_bam_gpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *XNVME_UNUSED(phys))
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
-	struct xnvme_be_bam_memory *m;
-	void *buf;
-	nvm_dma_t *mem;
-	int err;
+	struct xnvme_be_bam_memory *mem;
+	CUdeviceptr vaddr;
+	size_t mem_size;
+	int dmabuf_fd, err;
 
-	err = cudaMalloc(&buf, NVM_PAGE_ALIGN(nbytes, 1 << 16)); //align to 64K;
+	size_t page_size = 1 << 16; // 64K
+	size_t buf_size = NVM_PAGE_ALIGN(nbytes, page_size);
+	uint32_t n_addrs = buf_size / page_size;
+
+	err =	cuMemAlloc(&vaddr, buf_size);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
 		return NULL;
 	}
 
-	err = nvm_dma_map_device(&mem, state->ctrlr, buf, nbytes);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
-		cudaFree(buf);
-		return NULL;
-	}
-
-	if (skiplist_find(state->list, mem->vaddr, _cmp, update)) {
-		XNVME_DEBUG("FAILED: mem->vaddr already exist in the skiplist");
+	if (skiplist_find(state->list, (void *)vaddr, _cmp, update)) {
+		XNVME_DEBUG("FAILED: vaddr already exist in the skiplist");
 		goto error;
 	}
-
-	err = cudaHostRegister(mem, sizeof(nvm_dma_t), cudaHostRegisterDefault);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
+	err = cuMemGetHandleForAddressRange(&dmabuf_fd, vaddr, buf_size,
+                                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+  if (err) {
+		XNVME_DEBUG("FAILED: could not get dmabuf_fd, err: %d", err);
 		goto error;
-	}
+  }
 
-	err = cudaHostRegister(mem->ioaddrs, sizeof(uint64_t) * mem->n_ioaddrs, cudaHostRegisterDefault);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not map dev memory, err: %d", err);
-		goto error;
-	}
-
-	err = cudaMallocManaged(&m, NVM_PAGE_ALIGN(sizeof(struct xnvme_be_bam_memory), 1 << 16));
+	mem_size = NVM_PAGE_ALIGN(sizeof(struct xnvme_be_bam_memory) + n_addrs * sizeof(uint64_t), page_size);
+	err = cudaMallocManaged(&mem, mem_size);
 	if (err) {
 		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
 		goto error;
 	}
 
-	m->mem = mem;
+	mem->vaddr = (void *) vaddr;
+	mem->dmabuf_fd = dmabuf_fd;
+	mem->page_size = page_size;
+	mem->n_addrs = n_addrs;
+	err = xnvme_be_bam_dmabuf_attach(mem);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not get dma addresses, err: %d", err);
+		goto error;
+	}
 
-	skiplist_link(state->list, &m->list, update);
+	skiplist_link(state->list, &mem->list, update);
 	return mem->vaddr;
 
 error:
-	nvm_dma_unmap(mem);
+	cuMemFree(vaddr);
+	cudaFree(mem);
 	return NULL;
 }
 
@@ -94,102 +179,120 @@ xnvme_be_bam_gpu_buf_free(const struct xnvme_dev *dev, void *buf)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 
-	m = container_of_or_null(skiplist_find(state->list, buf, _cmp, update), struct xnvme_be_bam_memory, list);
-	if (!m) {
+	mem = container_of_or_null(skiplist_find(state->list, buf, _cmp, update), struct xnvme_be_bam_memory, list);
+	if (!mem) {
 		XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
 		return;
 	}
 
-	skiplist_erase(state->list, &m->list, update);
-	cudaHostUnregister(m->mem->ioaddrs);
-	cudaHostUnregister(m->mem);
-	nvm_dma_unmap(m->mem);
-	cudaFree(m);
+	skiplist_erase(state->list, &mem->list, update);
+	xnvme_be_bam_dmabuf_detach(mem);
+	cuMemFree((CUdeviceptr) mem->vaddr);
+	cudaFree(mem);
 }
 
+static int
+xnvme_be_bam_cpu_create_dmabuf(int *dmabuf_fd, void **vaddr, size_t buf_size)
+{
+  struct udmabuf_create create;
+	int udmabuf_fd, memfd, err;
+	memfd = memfd_create("xnvme_be_bam", MFD_ALLOW_SEALING);
+  if (memfd < 0) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: couldn't create memfd, errno: %d", err);
+    return err;
+  }
 
-int
-xnvme_be_bam_cpu_dma_map(struct xnvme_be_bam_state *state, struct xnvme_be_bam_memory **m, void *buf, size_t nbytes) {
-	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
-	nvm_dma_t *mem;
-	int err;
+  err = fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+  if (err) {
+		err = -errno;
+    XNVME_DEBUG("FAILED: couldn't set seals on memfd, errno: %d", err);
+    return err;
+  }
 
-	if (skiplist_find(state->list, buf, _cmp, update)) {
-			XNVME_DEBUG("FAILED: buf already exist in the skiplist");
-			return -EEXIST;
-	}
+  err = ftruncate(memfd, buf_size);
+  if (err) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: couldn't resize memfd, errno: %d", err);
+    return err;
+  }
 
-	err = nvm_dma_map_host(&mem, state->ctrlr, buf, nbytes);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not dma map memory, err: %d", err);
-		return err;
-	}
+  udmabuf_fd = open("/dev/udmabuf", O_RDWR);
+  if (udmabuf_fd < 0) {
+  	err = -errno;
+    XNVME_DEBUG("FAILED: could not open udmabuf dev, errno: %d", err);
+    return err;
+  }
 
-	err = cudaHostRegister(mem, sizeof(nvm_dma_t), cudaHostRegisterDefault);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not register memory, err: %d", err);
-		goto error;
-	}
+  memset(&create, 0, sizeof(create));
+  create.memfd = memfd;
+  create.offset = 0;
+  create.size = buf_size;
+  *dmabuf_fd = ioctl(udmabuf_fd, UDMABUF_CREATE, &create);
+  if (*dmabuf_fd < 0) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: couldn't create udmabuf, errno: %d", err);
+    return err;
+  }
 
-	err = cudaHostRegister(mem->ioaddrs, sizeof(uint64_t) * mem->n_ioaddrs, cudaHostRegisterDefault);
-	if (err) {
-		XNVME_DEBUG("FAILED: could not register ioaddrs, err: %d", err);
-		goto error;
-	}
+  close(udmabuf_fd);
 
-	err = cudaMallocManaged(m, NVM_PAGE_ALIGN(sizeof(struct xnvme_be_bam_memory), 1 << 12));
-	if (err) {
-		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
-		goto error;
-	}
+  *vaddr = mmap(NULL, buf_size, PROT_READ | PROT_WRITE, MAP_SHARED, *dmabuf_fd, 0);
+  if (!(*vaddr)) {
+    err = -errno;
+    XNVME_DEBUG("FAILED: couldn't mmap udmabuf, errno: %d\n", err);
+    return err;
+  }
 
-	(*m)->mem = mem;
-	skiplist_link(state->list, &(*m)->list, update);
-
-	return 0;
-
-	error:
-		nvm_dma_unmap(mem);
-		return err;
+  return 0;
 }
 
 void *
 xnvme_be_bam_cpu_buf_alloc(const struct xnvme_dev *dev, size_t nbytes, uint64_t *XNVME_UNUSED(phys))
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
-	struct xnvme_be_bam_memory *m;
-	void *buf;
-	int err;
-	uint64_t size = NVM_PAGE_ALIGN(nbytes, 1 << 12); //align to 4K
+	struct skiplist_node *update[SKIPLIST_LEVELS] = {};
+	struct xnvme_be_bam_memory *mem;
+	void *vaddr;
+	size_t mem_size;
+	int err, dmabuf_fd = 0;
 
-	err = cudaMallocHost(&buf, size);
+	size_t page_size = 1 << 12; // 4K
+	size_t buf_size = NVM_PAGE_ALIGN(nbytes, page_size);
+	uint32_t n_addrs = buf_size / page_size;
+
+	err = xnvme_be_bam_cpu_create_dmabuf(&dmabuf_fd, &vaddr, buf_size);
 	if (err) {
-		XNVME_DEBUG("FAILED: couldn't allocate memory, err: %d", err);
+		XNVME_DEBUG("FAILED: couldn't create dmabuf");
 		return NULL;
 	}
 
-	err = xnvme_be_bam_cpu_dma_map(state, &m, buf, nbytes);
+	if (skiplist_find(state->list, vaddr, _cmp, update)) {
+			XNVME_DEBUG("FAILED: buf already exist in the skiplist");
+			return NULL;
+	}
+
+	mem_size = NVM_PAGE_ALIGN(sizeof(struct xnvme_be_bam_memory) + n_addrs * sizeof(uint64_t), 1<<16); // Align GPU allocation to 64K
+	err = cudaMallocManaged(&mem, mem_size);
 	if (err) {
-		XNVME_DEBUG("FAILED: couldn't create dma mapping, err: %d", err);
+		XNVME_DEBUG("FAILED: could not allocate memory, err: %d", err);
+		return NULL;
+	}
+	mem->vaddr = vaddr;
+	mem->dmabuf_fd = dmabuf_fd;
+	mem->page_size = page_size;
+	mem->n_addrs = n_addrs;
+
+	err = xnvme_be_bam_dmabuf_attach(mem);
+	if (err) {
+		XNVME_DEBUG("FAILED: could not get dma addresses, err: %d", err);
 		return NULL;
 	}
 
-	return buf;
-}
-
-void
-xnvme_be_bam_cpu_dma_unmap(struct skiplist_node *n) {
-	struct xnvme_be_bam_memory *m = container_of_or_null(n, struct xnvme_be_bam_memory, list);
-	if (!m) {
-		XNVME_DEBUG("FAILED: couldn't find memory from skiplist node");
-		return;
-	}
-	cudaHostUnregister(m->mem->ioaddrs);
-	cudaHostUnregister(m->mem);
-	nvm_dma_unmap(m->mem);
-	cudaFree(m);
+	skiplist_link(state->list, &mem->list, update);
+	return mem->vaddr;
 }
 
 void
@@ -197,7 +300,7 @@ xnvme_be_bam_cpu_buf_free(const struct xnvme_dev *dev, void *buf)
 {
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state *)dev->be.state;
 	struct skiplist_node *n, *update[SKIPLIST_LEVELS] = {};
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 
 	n = skiplist_find(state->list, buf, _cmp, update);
 	if (!n) {
@@ -206,7 +309,13 @@ xnvme_be_bam_cpu_buf_free(const struct xnvme_dev *dev, void *buf)
 	}
 
 	skiplist_erase(state->list, n, update);
-	xnvme_be_bam_cpu_dma_unmap(n);
+	mem = container_of_or_null(n, struct xnvme_be_bam_memory, list);
+	if (!mem) {
+		XNVME_DEBUG("FAILED: couldn't find memory from skiplist node");
+		return;
+	}
+	xnvme_be_bam_dmabuf_detach(mem);
+	cudaFree(mem);
 }
 #endif
 

@@ -25,6 +25,8 @@ extern "C" {
 #include <nvm_parallel_queue.h>
 #include <util.h>
 
+#include <cuda.h>
+
 #include <skiplist.h>
 
 #include <xnvme_be.h>
@@ -37,6 +39,7 @@ struct xnvme_be_bam_state {
 	nvm_queue_t *cq;
 	nvm_dma_t **sq_mem;
 	nvm_dma_t **cq_mem;
+	CUcontext cu_ctx;
 
 	struct skiplist *list;
 	struct xnvme_queue *sync_q;
@@ -51,8 +54,12 @@ struct xnvme_be_bam_state {
 XNVME_STATIC_ASSERT(sizeof(struct xnvme_be_bam_state) == XNVME_BE_STATE_NBYTES, "Incorrect size")
 
 struct xnvme_be_bam_memory {
-	nvm_dma_t *mem;
+	void *vaddr;
+	int dmabuf_fd;
+	uint32_t page_size;
+	uint32_t n_addrs;
 	struct skiplist_node list;
+	uint64_t addrs[];
 };
 
 struct xnvme_queue_bam {
@@ -89,15 +96,8 @@ int
 xnvme_be_bam_gpu_create_queues(struct xnvme_dev *dev, uint16_t qd, uint16_t n_qps);
 
 void
-xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, nvm_dma_t *mem,
+xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, xnvme_be_bam_memory *mem,
 		      nvm_cmd_t *cmd, uint32_t cmd_id);
-
-int
-xnvme_be_bam_cpu_dma_map(struct xnvme_be_bam_state *state, struct xnvme_be_bam_memory **m,
-			 void *buf, size_t nbytes);
-
-void
-xnvme_be_bam_cpu_dma_unmap(struct skiplist_node *n);
 
 extern struct xnvme_be_admin g_xnvme_be_bam_admin;
 extern struct xnvme_be_sync g_xnvme_be_bam_sync;

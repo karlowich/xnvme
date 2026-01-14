@@ -15,7 +15,6 @@ int
 xnvme_be_bam_queue_init(struct xnvme_queue *q, int XNVME_UNUSED(opts))
 {
 	struct xnvme_queue_bam *queue = (struct xnvme_queue_bam *)q;
-	struct xnvme_dev *dev = queue->base.dev;
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)queue->base.dev->be.state;
 	void *cq_buf, *sq_buf;
 	struct local_admin *admin;
@@ -176,26 +175,26 @@ xnvme_be_bam_queue_poke(struct xnvme_queue *queue, uint32_t max)
 }
 
 void
-xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, nvm_dma_t *mem, nvm_cmd_t *cmd, uint32_t cmd_id)
+xnvme_be_bam_cmd_data(struct xnvme_queue_bam *q, void *dbuf, uint64_t dbuf_nbytes, xnvme_be_bam_memory *mem, nvm_cmd_t *cmd, uint32_t cmd_id)
 {
-		uint64_t ioaddr, offset, prp1, prp2 = 0;
+		uint64_t addr, offset, prp1, prp2 = 0;
 		uint16_t prp_offset;
 		uint64_t *prp_list;
 		size_t n_pages;
 
-		ioaddr = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
+		addr = ((uint64_t)dbuf - (uint64_t)mem->vaddr) / mem->page_size;
 		offset = ((uint64_t)dbuf - (uint64_t)mem->vaddr) % mem->page_size;
 		n_pages = (dbuf_nbytes + mem->page_size - 1) / mem->page_size;
-		prp1 = mem->ioaddrs[ioaddr] + offset;
+		prp1 = mem->addrs[addr] + offset;
 
 		if (n_pages == 2) {
-			prp2 = mem->ioaddrs[ioaddr+1];
+			prp2 = mem->addrs[addr+1];
 		} else if (n_pages > 2) {
 			prp_offset = (cmd_id % q->sq->qs) + 1;
 			prp_list = (uint64_t *)NVM_DMA_OFFSET(q->sq_mem, prp_offset);
 			prp2 = q->sq_mem->ioaddrs[prp_offset];
 			for (size_t i = 1; i < n_pages; ++i) {
-	      prp_list[i-1] = mem->ioaddrs[ioaddr+i];
+	      prp_list[i-1] = mem->addrs[addr+i];
 	    }
 		}
 		nvm_cmd_data_ptr(cmd, prp1, prp2);
@@ -208,9 +207,8 @@ xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nby
 	struct xnvme_queue_bam *queue = (struct xnvme_queue_bam *)ctx->async.queue;
 	struct xnvme_be_bam_state *state = (struct xnvme_be_bam_state*)queue->base.dev->be.state;
 	uint32_t cmd_id = ((struct xnvme_cmd_ctx_entry *)ctx)->id;
-	struct xnvme_be_bam_memory *m;
+	struct xnvme_be_bam_memory *mem;
 	nvm_cmd_t *cmd;
-	int err;
 
 	if (queue->base.outstanding == queue->base.capacity) {
 		XNVME_DEBUG("FAILED: queue is full");
@@ -226,16 +224,12 @@ xnvme_be_bam_async_cmd_io(struct xnvme_cmd_ctx *ctx, void *dbuf, size_t dbuf_nby
 	*cmd = *((nvm_cmd_t *)&ctx->cmd);
 
 	if (dbuf) {
-		m = xnvme_be_bam_memory_find(state, dbuf);
-		if (!m) {
-			XNVME_DEBUG("WARNING: couldn't find memory in skiplist, creating new mapping");
-			err = xnvme_be_bam_cpu_dma_map(state, &m, dbuf, dbuf_nbytes);
-			if (err) {
-				XNVME_DEBUG("FAILED: couldn't create dma mapping, err: %d", err);
-				return err;
-			}
+		mem = xnvme_be_bam_memory_find(state, dbuf);
+		if (!mem) {
+			XNVME_DEBUG("FAILED: couldn't find memory in skiplist");
+			return -ENOENT;
 		}
-		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, m->mem, cmd, cmd_id);
+		xnvme_be_bam_cmd_data(queue, dbuf, dbuf_nbytes, mem, cmd, cmd_id);
 	}
 
 	nvm_sq_submit(queue->sq);

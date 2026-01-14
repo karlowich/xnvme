@@ -78,7 +78,7 @@ foreach test_source, tests_args : tests
     test_source,
     include_directories: [conf_inc, xnvme_inc],
     link_with: xnvmelib,
-    link_args: link_args_hardening + cuda_archs,
+    link_args: link_args_hardening + cuda_args,
     install_rpath: xnvmelib_rpath,
     install: true,
   )
