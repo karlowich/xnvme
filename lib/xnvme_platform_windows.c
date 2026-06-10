@@ -19,10 +19,21 @@
 static uint32_t
 xnvme_platform_windows_classify(const char *uri)
 {
+	const char *base = uri;
 	size_t len;
 
-	/* Windows device handles: \\.\PhysicalDriveN, \\.\ScsiN: */
-	if (!strncmp(uri, "\\\\.\\", 4)) {
+	/* Block-device handles live in the \\.\ namespace, e.g. \\.\PhysicalDriveN
+	 * or \\.\ScsiN:. An option parser may strip the backslashes before the URI
+	 * reaches us, leaving ".PhysicalDriveN". Accept the intact "\\.\" prefix or a
+	 * single leading '.', then require the device keyword followed by a digit so
+	 * ordinary file paths are not misread as devices. */
+	if (!strncmp(base, "\\\\.\\", 4)) {
+		base += 4;
+	} else if (base[0] == '.') {
+		base += 1;
+	}
+	if ((!strncmp(base, "PhysicalDrive", 13) && base[13] >= '0' && base[13] <= '9') ||
+	    (!strncmp(base, "Scsi", 4) && base[4] >= '0' && base[4] <= '9')) {
 		return XNVME_BE_CAP_BDEV;
 	}
 
