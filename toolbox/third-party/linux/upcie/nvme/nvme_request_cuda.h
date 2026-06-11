@@ -20,7 +20,8 @@
  * Caveats
  * -------
  *
- * - Assumes that the memory backing `dbuf` in `heap` is physically contiguous.
+ * - `dbuf` need not be physically contiguous; every PRP entry is translated via
+ *   `cudamem_heap_block_vtp()`, so buffers may span physically scattered device pages.
  * - Does *not* support PRP list chaining; only a single list page is constructed.
  *
  * @param request Pointer to the NVMe request context used for tracking and metadata.
@@ -33,24 +34,32 @@ static inline void
 nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct cudamem_heap *heap,
                                            void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
 {
-	const uint64_t npages = (dbuf_nbytes + heap->config->pagesize - 1) >> heap->config->pagesize_shift;
 	const uint64_t pagesize = heap->config->pagesize;
+
+	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
+
+	/* Only PRP1 may carry a sub-page offset; the page count and every later
+	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize).
+	 * Entries are translated individually — the heap is virtually contiguous
+	 * but physically contiguous only within a device page. */
+	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
+	uint8_t *vbase = (uint8_t *)dbuf - page_off;
+	const uint64_t npages =
+		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
 
 	/* Chaining is not supported, thus assert that the given dbuf fits. */
 	assert(npages <= 1 + 512);
 
-	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
-
 	if (npages == 1) {
 		return;
 	} else if (npages == 2) {
-		cmd->prp2 = cmd->prp1 + pagesize;
+		cmd->prp2 = cudamem_heap_block_vtp(heap, vbase + pagesize);
 	} else {
 		uint64_t *prp_list = (uint64_t *)request->prp;
 
 		cmd->prp2 = request->prp_addr;
 		for (uint64_t i = 1; i < npages; ++i) {
-			prp_list[i - 1] = cmd->prp1 + (i << heap->config->pagesize_shift);
+			prp_list[i - 1] = cudamem_heap_block_vtp(heap, vbase + i * pagesize);
 		}
 	}
 }

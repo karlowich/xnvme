@@ -64,6 +64,7 @@ extern "C" {
 
 // Linux UAPI
 #include <linux/memfd.h>
+#include <linux/pci_regs.h>
 #include <linux/vfio.h>
 
 // uPCIe libraries

@@ -17,6 +17,7 @@ struct cudamem_config {
 	int pagesize;       ///< Host page size (e.g. 4 KB); used for NVMe PRP and allocation alignment
 	int pagesize_shift; ///< pagesize expressed as a power of two: pagesize == 1 << pagesize_shift
 	int device_pagesize;  ///< GPU device page size (dma-buf page granularity for cuMemAlloc memory)
+	int device_pagesize_shift; ///< device_pagesize as a power of two: 1 << device_pagesize_shift
 };
 
 static inline int
@@ -35,6 +36,7 @@ cudamem_config_pp(struct cudamem_config *config)
 	wrtn += printf("  pagesize:      %d\n", config->pagesize);
 	wrtn += printf("  pagesize_shift:%d\n", config->pagesize_shift);
 	wrtn += printf("  device_pagesize: %d\n", config->device_pagesize);
+	wrtn += printf("  device_pagesize_shift: %d\n", config->device_pagesize_shift);
 
 	return wrtn;
 }
@@ -65,6 +67,7 @@ cudamem_config_init(struct cudamem_config *config, int gpu_id)
 	config->pagesize = getpagesize();
 	config->pagesize_shift = upcie_util_shift_from_size(config->pagesize);
 	config->device_pagesize = 65536;
+	config->device_pagesize_shift = upcie_util_shift_from_size(config->device_pagesize);
 
 	return 0;
 }
