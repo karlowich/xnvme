@@ -1,0 +1,26 @@
+# xnvmeperf performance-regression scenario
+#
+# Combine with a target/transport config that provides [[devices]] (and any
+# environment prep), e.g.:
+#
+#   cijoe -c configs/<target>.toml -c configs/regression.toml \
+#         workflows/xnvmeperf-regression.yaml
+#
+# The runner sweeps the cross-product backends x iosizes x qdepths x ndevs x
+# cpumasks.
+[regression]
+backends = ["upcie", "upcie-cuda"]
+iosizes = [512, 4096, 16384, 65536]
+qdepths = [128]
+ndevs = [16]
+cpumasks = ["0x1", "0x3"]
+iopattern = "randread"
+runtime = 10
+repetitions = 5
+
+# Baseline (known-good) ref.
+baseline_ref = "main"
+
+# Relative degradation a metric must exceed (alongside disjoint 95% confidence
+# intervals) to count as a regression.
+tolerance = 0.01

@@ -1,0 +1,72 @@
+---
+doc: |
+  xNVMe performance regression: build, measure and compare two refs
+  =================================================================
+
+  End-to-end A/B: builds and installs the baseline ref
+  (``regression.baseline_ref``, default main) and the candidate (whatever is
+  checked out at start -- the branch/PR under test), sweeps xnvmeperf against
+  each, and emits a PASS/REGRESSION verdict. The compare step exits non-zero on
+  regression to fail CI. Sweep parameters come from ``[regression]``; see
+  configs/regression.toml.
+
+  Usage::
+
+    cijoe -c configs/<target>.toml -c configs/regression.toml \
+          workflows/xnvmeperf-regression.yaml
+
+  The target config must provide ``[[devices]]``, ``xnvme.repository.path`` and
+  ``[os]``, with the environment prepared for the backend(s) under test. Assumes
+  a clean working tree: untracked files (this harness) survive the ref switches,
+  uncommitted tracked changes would block checkout.
+
+steps:
+- name: build_prep
+  uses: xnvme_build_prep
+
+- name: capture_candidate
+  run: |
+    git -C {{ config.xnvme.repository.path }} rev-parse HEAD | tee /tmp/xnvme_candidate_ref
+
+- name: checkout_baseline
+  run: |
+    git -C {{ config.xnvme.repository.path }} checkout {{ config.regression.baseline_ref }}
+    git -C {{ config.xnvme.repository.path }} submodule update --init --recursive
+    git -C {{ config.xnvme.repository.path }} rev-parse --short HEAD
+
+- name: build_baseline
+  uses: xnvme_build
+
+- name: install_baseline
+  uses: xnvme_install
+
+- name: ldconfig_baseline
+  run: ldconfig /usr/local/lib/ || true
+
+- name: bench_baseline
+  uses: xnvmeperf_bench
+  with:
+    label: baseline
+
+- name: checkout_candidate
+  run: |
+    git -C {{ config.xnvme.repository.path }} checkout "$(cat /tmp/xnvme_candidate_ref)"
+    git -C {{ config.xnvme.repository.path }} submodule update --init --recursive
+    git -C {{ config.xnvme.repository.path }} rev-parse --short HEAD
+
+- name: build_candidate
+  uses: xnvme_build
+
+- name: install_candidate
+  uses: xnvme_install
+
+- name: ldconfig_candidate
+  run: ldconfig /usr/local/lib/ || true
+
+- name: bench_candidate
+  uses: xnvmeperf_bench
+  with:
+    label: candidate
+
+- name: compare
+  uses: xnvmeperf_regression
