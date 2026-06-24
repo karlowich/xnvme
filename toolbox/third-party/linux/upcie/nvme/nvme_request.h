@@ -177,16 +177,19 @@ nvme_request_prep_command_prps_contig(struct nvme_request *request, struct hostm
 {
 	const uint64_t pagesize = heap->config->pagesize;
 
-	cmd->prp1 = hostmem_dma_v2p(heap, dbuf);
-
 	/* Only PRP1 may carry a sub-page offset; the page count and every later
 	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize).
 	 * Entries are translated individually — the heap is virtually contiguous
-	 * but physically contiguous only within a hugepage. */
-	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
+	 * but physically contiguous only within a hugepage. The sub-page offset is
+	 * identical for the virtual and translated address, so take it from `dbuf`
+	 * to keep the page count (and the single-page early-out below) off the
+	 * v2p() load's dependency chain — the hot path for small, single-page I/O. */
+	const uint64_t page_off = (uintptr_t)dbuf & (pagesize - 1);
 	uint8_t *vbase = (uint8_t *)dbuf - page_off;
 	const uint64_t npages =
 		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
+
+	cmd->prp1 = hostmem_dma_v2p(heap, dbuf);
 
 	/* Chaining is not supported, thus assert that the given dbuf fits. */
 	assert(npages <= 1 + 512);
