@@ -82,13 +82,10 @@ cudamem_config_pp(struct cudamem_config *config)
  * when violated) catches a hardware/driver mismatch at runtime.
  *
  * The framebuffer aperture size is read via pci_bar_largest_size(bdf, ...),
- * where <bdf> is obtained from cuDeviceGetPCIBusId(). NVIDIA's framebuffer
- * aperture (conventionally "BAR1") is resource1 when BAR0 is a 32-bit MMIO
- * BAR, but shifts to resource2 when BAR0 is 64-bit (consuming register slots
- * 0 and 1); selecting the largest BAR handles both layouts. The function
- * fails if the aperture is smaller than total device memory: PCIe P2P DMA
- * over the full device memory range requires the aperture to span it, which
- * in turn requires resizable BAR (or a similarly sized fixed BAR) to be
+ * where <bdf> is obtained from cuDeviceGetPCIBusId(); the largest BAR is the
+ * framebuffer aperture regardless of whether BAR0 is 32-bit or 64-bit. PCIe
+ * P2P DMA over the full device memory range requires the aperture to span it,
+ * which in turn requires resizable BAR (or a similarly sized fixed BAR) to be
  * enabled in firmware.
  *
  * @param config  Pointer to the config struct to initialize

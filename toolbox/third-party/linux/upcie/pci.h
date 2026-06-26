@@ -282,13 +282,8 @@ pci_bar_size(const char *bdf, uint8_t id, size_t *size)
 /**
  * Read the size of the largest PCI memory BAR for the function at `bdf`.
  *
- * NVIDIA's framebuffer aperture (conventionally "BAR1") sits at resource1 when
- * BAR0 is a 32-bit MMIO BAR, but shifts to resource2 when BAR0 is 64-bit (and
- * thus consumes register slots 0 and 1). Rather than assume a fixed index,
- * scan all BARs and return the largest: on a GPU this is always the
- * framebuffer aperture, which is also the region PCIe P2P DMA must span.
- * Non-existent resourceN entries (unmapped BARs and the high half of a 64-bit
- * BAR) are skipped.
+ * Scans all BARs and returns the largest. Non-existent resourceN entries
+ * (unmapped BARs and the high half of a 64-bit BAR) are skipped.
  *
  * @return 0 on success with *size set, negative errno on failure.
  */
