@@ -175,32 +175,32 @@ static inline void
 nvme_request_prep_command_prps_contig(struct nvme_request *request, struct hostmem_heap *heap,
 				      void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
 {
-	const uint64_t pagesize = heap->config->pagesize;
-
 	cmd->prp1 = hostmem_dma_v2p(heap, dbuf);
 
-	/* Only PRP1 may carry a sub-page offset; the page count and every later
-	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize).
+	/* The hot single-page path needs only PRP1. A buffer spans more than one
+	 * page (npages > 1) iff its sub-page offset plus length exceeds a page;
+	 * only then compute the page count and translate the remaining entries.
 	 * Entries are translated individually — the heap is virtually contiguous
 	 * but physically contiguous only within a hugepage. */
-	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
-	uint8_t *vbase = (uint8_t *)dbuf - page_off;
-	const uint64_t npages =
-		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
+	if (((cmd->prp1 & (heap->config->pagesize - 1)) + dbuf_nbytes) > heap->config->pagesize) {
+		const uint64_t pagesize = heap->config->pagesize;
+		const uint64_t page_off = cmd->prp1 & (pagesize - 1);
+		const uint64_t npages =
+			(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
+		uint8_t *vbase = (uint8_t *)dbuf - page_off;
 
-	/* Chaining is not supported, thus assert that the given dbuf fits. */
-	assert(npages <= 1 + 512);
+		/* Chaining is not supported, thus assert that the given dbuf fits. */
+		assert(npages <= 1 + 512);
 
-	if (npages == 1) {
-		return;
-	} else if (npages == 2) {
-		cmd->prp2 = hostmem_dma_v2p(heap, vbase + pagesize);
-	} else {
-		uint64_t *prp_list = request->prp;
+		if (npages == 2) {
+			cmd->prp2 = hostmem_dma_v2p(heap, vbase + pagesize);
+		} else {
+			uint64_t *prp_list = request->prp;
 
-		cmd->prp2 = request->prp_addr;
-		for (uint64_t i = 1; i < npages; ++i) {
-			prp_list[i - 1] = hostmem_dma_v2p(heap, vbase + i * pagesize);
+			cmd->prp2 = request->prp_addr;
+			for (uint64_t i = 1; i < npages; ++i) {
+				prp_list[i - 1] = hostmem_dma_v2p(heap, vbase + i * pagesize);
+			}
 		}
 	}
 }
