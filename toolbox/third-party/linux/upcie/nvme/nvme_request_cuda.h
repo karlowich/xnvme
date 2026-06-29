@@ -10,6 +10,43 @@
  */
 
 /**
+ * Build PRP2 / the PRP-list for a contiguous CUDA data buffer that spans more than one page.
+ *
+ * Out-of-line slow path for nvme_request_prep_command_prps_contig_cuda(). Kept
+ * non-inlined so the per-entry cudamem_heap_block_vtp() translations are not
+ * emitted into the single-page fast path, where they perturb its codegen. The
+ * `inline` keyword here governs only header linkage (the definition may appear
+ * in many translation units, and is dropped without a -Wunused-function warning
+ * when a unit does not use it); __attribute__((noinline)) forces the out-of-line
+ * emission. PRP1 is expected to already be set by the caller.
+ */
+static inline void __attribute__((noinline))
+nvme_request_prep_command_prps_contig_cuda_multipage(struct nvme_request *request,
+						     struct cudamem_heap *heap, void *dbuf,
+						     uint64_t page_off, size_t dbuf_nbytes,
+						     struct nvme_command *cmd)
+{
+	const uint64_t pagesize = heap->config->pagesize;
+	const uint64_t npages =
+		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
+	uint8_t *vbase = (uint8_t *)dbuf - page_off;
+
+	/* Chaining is not supported, thus assert that the given dbuf fits. */
+	assert(npages <= 1 + 512);
+
+	if (npages == 2) {
+		cmd->prp2 = cudamem_heap_block_vtp(heap, vbase + pagesize);
+	} else {
+		uint64_t *prp_list = (uint64_t *)request->prp;
+
+		cmd->prp2 = request->prp_addr;
+		for (uint64_t i = 1; i < npages; ++i) {
+			prp_list[i - 1] = cudamem_heap_block_vtp(heap, vbase + i * pagesize);
+		}
+	}
+}
+
+/**
  * Prepare the PRP list for a command with a contiguous CUDA data buffer.
  *
  * This function initializes the Physical Region Page (PRP) entries in the given NVMe command
@@ -38,29 +75,13 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 
 	/* The hot single-page path needs only PRP1. A buffer spans more than one
 	 * page (npages > 1) iff its sub-page offset plus length exceeds a page;
-	 * only then compute the page count and translate the remaining entries.
-	 * Entries are translated individually — the heap is virtually contiguous
-	 * but physically contiguous only within a device page. */
-	if (((cmd->prp1 & (heap->config->pagesize - 1)) + dbuf_nbytes) > heap->config->pagesize) {
-		const uint64_t pagesize = heap->config->pagesize;
-		const uint64_t page_off = cmd->prp1 & (pagesize - 1);
-		const uint64_t npages =
-			(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
-		uint8_t *vbase = (uint8_t *)dbuf - page_off;
+	 * the multi-page build is kept out-of-line so its per-entry translations
+	 * do not perturb the codegen of this hot path. */
+	const uint64_t page_off = cmd->prp1 & (heap->config->pagesize - 1);
 
-		/* Chaining is not supported, thus assert that the given dbuf fits. */
-		assert(npages <= 1 + 512);
-
-		if (npages == 2) {
-			cmd->prp2 = cudamem_heap_block_vtp(heap, vbase + pagesize);
-		} else {
-			uint64_t *prp_list = (uint64_t *)request->prp;
-
-			cmd->prp2 = request->prp_addr;
-			for (uint64_t i = 1; i < npages; ++i) {
-				prp_list[i - 1] = cudamem_heap_block_vtp(heap, vbase + i * pagesize);
-			}
-		}
+	if (page_off + dbuf_nbytes > heap->config->pagesize) {
+		nvme_request_prep_command_prps_contig_cuda_multipage(request, heap, dbuf, page_off,
+								     dbuf_nbytes, cmd);
 	}
 }
 
