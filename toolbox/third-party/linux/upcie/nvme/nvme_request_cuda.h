@@ -20,8 +20,9 @@
  * Caveats
  * -------
  *
- * - `dbuf` need not be physically contiguous; every PRP entry is translated via
- *   `cudamem_heap_block_vtp()`, so buffers may span physically scattered device pages.
+ * - `dbuf` need not be physically contiguous; PRP entries are strided physically
+ *   from PRP1 within a device page and re-translated at each device-page boundary,
+ *   so buffers may span physically scattered device pages.
  * - Does *not* support PRP list chaining; only a single list page is constructed.
  *
  * @param request Pointer to the NVMe request context used for tracking and metadata.
@@ -39,11 +40,8 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
 
 	/* Only PRP1 may carry a sub-page offset; the page count and every later
-	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize).
-	 * Entries are translated individually — the heap is virtually contiguous
-	 * but physically contiguous only within a device page. */
+	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize). */
 	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
-	uint8_t *vbase = (uint8_t *)dbuf - page_off;
 	const uint64_t npages =
 		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
 
@@ -52,15 +50,40 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 
 	if (npages == 1) {
 		return;
-	} else if (npages == 2) {
-		cmd->prp2 = cudamem_heap_block_vtp(heap, vbase + pagesize);
-	} else {
-		uint64_t *prp_list = (uint64_t *)request->prp;
+	}
 
-		cmd->prp2 = request->prp_addr;
-		for (uint64_t i = 1; i < npages; ++i) {
-			prp_list[i - 1] = cudamem_heap_block_vtp(heap, vbase + i * pagesize);
+	/* The heap is virtually contiguous but physically contiguous only within a
+	 * device page. Stride PRP entries physically from PRP1 while inside the same
+	 * device page and re-translate when the running address crosses a device-page
+	 * boundary. A buffer that fits within a single device page (the common case)
+	 * never crosses, so this reduces to the stride of a contiguous buffer. */
+	uint8_t *vbase = (uint8_t *)dbuf - page_off;
+	const uint64_t dp_off =
+		((uint64_t)vbase - heap->vaddr) & (heap->config->device_pagesize - 1);
+	uint64_t strides_left =
+		((heap->config->device_pagesize - dp_off) >> heap->config->pagesize_shift) - 1;
+	uint64_t page_phys = cmd->prp1 - page_off;
+
+	if (npages == 2) {
+		cmd->prp2 = strides_left ? page_phys + pagesize
+					 : cudamem_heap_block_vtp(heap, vbase + pagesize);
+		return;
+	}
+
+	uint64_t *prp_list = (uint64_t *)request->prp;
+
+	cmd->prp2 = request->prp_addr;
+	for (uint64_t i = 1; i < npages; ++i) {
+		if (strides_left) {
+			page_phys += pagesize;
+			strides_left--;
+		} else {
+			page_phys = cudamem_heap_block_vtp(
+				heap, vbase + (i << heap->config->pagesize_shift));
+			strides_left =
+				(heap->config->device_pagesize >> heap->config->pagesize_shift) - 1;
 		}
+		prp_list[i - 1] = page_phys;
 	}
 }
 
