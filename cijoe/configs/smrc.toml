@@ -1,0 +1,65 @@
+# Target: smrc (16x NVMe, dual-socket Xeon Gold 6442Y).
+#
+# No [cijoe.transport.ssh] section -> cijoe uses the Local transport, executing
+# on the invoking machine. Run this on smrc itself (latency rules out remote).
+
+[cijoe.workflow]
+fail_fast = true
+
+[os]
+name = "ubuntu"
+version = "noble"
+
+[xnvme.repository]
+path = "/root/git/xnvme"
+
+[hugetlbfs]
+nr_hugepages = 2048
+
+[[devices]]
+pci_addr = "0000:4a:00.0"
+
+[[devices]]
+pci_addr = "0000:4b:00.0"
+
+[[devices]]
+pci_addr = "0000:4c:00.0"
+
+[[devices]]
+pci_addr = "0000:4d:00.0"
+
+[[devices]]
+pci_addr = "0000:61:00.0"
+
+[[devices]]
+pci_addr = "0000:62:00.0"
+
+[[devices]]
+pci_addr = "0000:63:00.0"
+
+[[devices]]
+pci_addr = "0000:64:00.0"
+
+[[devices]]
+pci_addr = "0000:ca:00.0"
+
+[[devices]]
+pci_addr = "0000:cb:00.0"
+
+[[devices]]
+pci_addr = "0000:cc:00.0"
+
+[[devices]]
+pci_addr = "0000:cd:00.0"
+
+[[devices]]
+pci_addr = "0000:e1:00.0"
+
+[[devices]]
+pci_addr = "0000:e2:00.0"
+
+[[devices]]
+pci_addr = "0000:e3:00.0"
+
+[[devices]]
+pci_addr = "0000:e4:00.0"

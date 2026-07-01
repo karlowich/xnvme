@@ -172,6 +172,20 @@ nvme_request_get(struct nvme_request_pool *pool, uint16_t cid)
  * @param dbuf_nbytes Size in bytes of the data buffer.
  * @param cmd Pointer to the NVMe command to be prepared with PRP entries.
  */
+
+/**
+ * Re-translate a PRP entry that crosses a hugepage boundary.
+ *
+ * Kept out-of-line so the rare boundary path does not inline a v2p into the hot
+ * contig builder; the common in-hugepage case strides physically from PRP1, and
+ * the inlined stride loop keeps large-I/O builds free of any per-entry call.
+ */
+static inline uint64_t __attribute__((noinline))
+nvme_request_prp_retranslate(struct hostmem_heap *heap, void *virt)
+{
+	return hostmem_dma_v2p(heap, virt);
+}
+
 static inline void
 nvme_request_prep_command_prps_contig(struct nvme_request *request, struct hostmem_heap *heap,
 				      void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
@@ -207,7 +221,7 @@ nvme_request_prep_command_prps_contig(struct nvme_request *request, struct hostm
 
 	if (npages == 2) {
 		cmd->prp2 = strides_left ? page_phys + pagesize
-					 : hostmem_dma_v2p(heap, vbase + pagesize);
+					 : nvme_request_prp_retranslate(heap, vbase + pagesize);
 		return;
 	}
 
@@ -219,8 +233,8 @@ nvme_request_prep_command_prps_contig(struct nvme_request *request, struct hostm
 			page_phys += pagesize;
 			strides_left--;
 		} else {
-			page_phys = hostmem_dma_v2p(heap,
-						    vbase + (i << heap->config->pagesize_shift));
+			page_phys = nvme_request_prp_retranslate(
+				heap, vbase + (i << heap->config->pagesize_shift));
 			strides_left = (heap->config->hugepgsz >> heap->config->pagesize_shift) - 1;
 		}
 		prp_list[i - 1] = page_phys;

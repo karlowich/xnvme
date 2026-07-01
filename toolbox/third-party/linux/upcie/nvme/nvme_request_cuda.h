@@ -31,6 +31,20 @@
  * @param dbuf_nbytes Size in bytes of the data buffer.
  * @param cmd Pointer to the NVMe command to be prepared with PRP entries.
  */
+
+/**
+ * Re-translate a PRP entry that crosses a device-page boundary.
+ *
+ * Kept out-of-line so the rare boundary path does not inline a vtp into the hot
+ * contig builder; the common in-device-page case strides physically from PRP1,
+ * and the inlined stride loop keeps large-I/O builds free of any per-entry call.
+ */
+static inline uint64_t __attribute__((noinline))
+nvme_request_prp_retranslate_cuda(struct cudamem_heap *heap, void *virt)
+{
+	return cudamem_heap_block_vtp(heap, virt);
+}
+
 static inline void
 nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct cudamem_heap *heap,
                                            void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
@@ -65,8 +79,9 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 	uint64_t page_phys = cmd->prp1 - page_off;
 
 	if (npages == 2) {
-		cmd->prp2 = strides_left ? page_phys + pagesize
-					 : cudamem_heap_block_vtp(heap, vbase + pagesize);
+		cmd->prp2 = strides_left
+				    ? page_phys + pagesize
+				    : nvme_request_prp_retranslate_cuda(heap, vbase + pagesize);
 		return;
 	}
 
@@ -78,7 +93,7 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 			page_phys += pagesize;
 			strides_left--;
 		} else {
-			page_phys = cudamem_heap_block_vtp(
+			page_phys = nvme_request_prp_retranslate_cuda(
 				heap, vbase + (i << heap->config->pagesize_shift));
 			strides_left =
 				(heap->config->device_pagesize >> heap->config->pagesize_shift) - 1;
