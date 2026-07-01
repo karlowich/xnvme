@@ -31,26 +31,20 @@
  * @param dbuf_nbytes Size in bytes of the data buffer.
  * @param cmd Pointer to the NVMe command to be prepared with PRP entries.
  */
-static inline void
-nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct cudamem_heap *heap,
-                                           void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
+/**
+ * Build the PRP list for a multi-page (npages > 1) contiguous CUDA data buffer.
+ *
+ * Kept out-of-line so the whole multi-page build -- boundary bookkeeping, PRP2
+ * handling and the stride loop -- stays entirely out of the hot contig builder,
+ * leaving its single-page (npages == 1) fast path unperturbed.
+ */
+static inline void __attribute__((noinline))
+nvme_request_prep_command_prps_contig_cuda_multipage(struct nvme_request *request,
+						     struct cudamem_heap *heap, void *dbuf,
+						     uint64_t page_off, uint64_t npages,
+						     struct nvme_command *cmd)
 {
 	const uint64_t pagesize = heap->config->pagesize;
-
-	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
-
-	/* Only PRP1 may carry a sub-page offset; the page count and every later
-	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize). */
-	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
-	const uint64_t npages =
-		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
-
-	/* Chaining is not supported, thus assert that the given dbuf fits. */
-	assert(npages <= 1 + 512);
-
-	if (npages == 1) {
-		return;
-	}
 
 	/* The heap is virtually contiguous but physically contiguous only within a
 	 * device page. Stride PRP entries physically from PRP1 while inside the same
@@ -85,6 +79,31 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 		}
 		prp_list[i - 1] = page_phys;
 	}
+}
+
+static inline void
+nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct cudamem_heap *heap,
+                                           void *dbuf, size_t dbuf_nbytes, struct nvme_command *cmd)
+{
+	const uint64_t pagesize = heap->config->pagesize;
+
+	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
+
+	/* Only PRP1 may carry a sub-page offset; the page count and every later
+	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize). */
+	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
+	const uint64_t npages =
+		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
+
+	/* Chaining is not supported, thus assert that the given dbuf fits. */
+	assert(npages <= 1 + 512);
+
+	if (npages == 1) {
+		return;
+	}
+
+	nvme_request_prep_command_prps_contig_cuda_multipage(request, heap, dbuf, page_off, npages,
+							     cmd);
 }
 
 /**
