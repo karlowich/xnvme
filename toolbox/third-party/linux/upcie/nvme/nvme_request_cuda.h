@@ -54,8 +54,10 @@ nvme_request_prep_command_prps_contig_cuda(struct nvme_request *request, struct 
 	cmd->prp1 = cudamem_heap_block_vtp(heap, dbuf);
 
 	/* Only PRP1 may carry a sub-page offset; the page count and every later
-	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize). */
-	const uint64_t page_off = cmd->prp1 & (pagesize - 1);
+	 * entry are measured from the page floor. ceil((off+nbytes)/pagesize). Take
+	 * the offset from the virtual address -- vtp preserves the sub-page offset --
+	 * so the page count and the npages == 1 branch do not wait on the vtp load. */
+	const uint64_t page_off = (uintptr_t)dbuf & (pagesize - 1);
 	const uint64_t npages =
 		(page_off + dbuf_nbytes + pagesize - 1) >> heap->config->pagesize_shift;
 
