@@ -13,14 +13,16 @@
 #if defined(XNVME_BE_CBI_MEM_POSIX_ENABLED)
 #define XNVME_BE_RAMDISK_MEM &g_xnvme_be_cbi_mem_posix
 #elif defined(XNVME_PLATFORM_WINDOWS_ENABLED)
-#include <xnvme_be_windows.h>
+// Reuse the Windows memory backend without pulling in its entire header
+extern struct xnvme_be_mem g_xnvme_be_windows_mem;
 #define XNVME_BE_RAMDISK_MEM &g_xnvme_be_windows_mem
 #else
 #error "ramdisk needs a mem implementation"
 #endif
 
 #if defined(XNVME_PLATFORM_LINUX_ENABLED)
-#include <xnvme_be_linux.h>
+// Reuse the Linux hugepage memory backend without pulling in its entire header
+extern struct xnvme_be_mem g_xnvme_be_linux_mem_hugepage;
 #define XNVME_BE_RAMDISK_MEM_OVERRIDES                         \
 	.mem_overrides = (const struct xnvme_be_mem *const[]){ \
 		&g_xnvme_be_linux_mem_hugepage,                \
