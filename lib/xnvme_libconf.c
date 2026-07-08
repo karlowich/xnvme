@@ -4,10 +4,16 @@
 
 #include <libxnvme.h>
 #include <libxnvme_libconf.h>
-#include <xnvme_be_linux.h>
-#include <xnvme_be_windows.h>
 #ifdef XNVME_PLATFORM_LINUX_ENABLED
 #include <linux/nvme_ioctl.h>
+// Defined by the Linux backend; forward-declared to avoid pulling in its header
+int
+xnvme_be_linux_uapi_ver_fpr(FILE *stream, enum xnvme_pr opts);
+#endif
+#ifdef XNVME_PLATFORM_WINDOWS_ENABLED
+// Defined by the Windows backend; forward-declared to avoid pulling in its header
+int
+xnvme_be_windows_uapi_ver_fpr(FILE *stream, enum xnvme_pr opts);
 #endif
 #include "xnvme_libconf_entries.c"
 
