@@ -4,7 +4,7 @@
 
 #include <errno.h>
 #include <libxnvme.h>
-#include <xnvme_be_linux.h>
+#include <xnvme_dev.h>
 
 int
 xnvme_file_pread(struct xnvme_cmd_ctx *ctx, void *buf, size_t count, off_t offset)
