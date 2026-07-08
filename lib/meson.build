@@ -5,67 +5,13 @@
 xnvmelib_source = [
   'xnvme_adm.c',
   'xnvme_be.c',
-  'xnvme_be_cbi_admin_shim.c',
-  'xnvme_be_cbi_async_emu.c',
-  'xnvme_be_cbi_async_nil.c',
-  'xnvme_be_cbi_async_posix.c',
-  'xnvme_be_cbi_async_thrpool.c',
-  'xnvme_be_cbi_mem_posix.c',
   'xnvme_be_cref.c',
-  'xnvme_be_cbi_sync_psync.c',
+  'xnvme_be_nosys.c',
   'xnvme_platform.c',
   'xnvme_platform_linux.c',
   'xnvme_platform_freebsd.c',
   'xnvme_platform_macos.c',
   'xnvme_platform_windows.c',
-  'xnvme_be_freebsd.c',
-  'xnvme_be_freebsd_async.c',
-  'xnvme_be_freebsd_dev.c',
-  'xnvme_be_freebsd_nvme.c',
-  'xnvme_be_linux.c',
-  'xnvme_be_linux_async_libaio.c',
-  'xnvme_be_linux_async_liburing.c',
-  'xnvme_be_linux_async_ucmd.c',
-  'xnvme_be_linux_block.c',
-  'xnvme_be_linux_dev.c',
-  'xnvme_be_linux_hugepage.c',
-  'xnvme_be_linux_nvme.c',
-  'xnvme_be_macos.c',
-  'xnvme_be_macos_admin.c',
-  'xnvme_be_macos_dev.c',
-  'xnvme_be_macos_sync.c',
-  'xnvme_be_macos_driverkit.c',
-  'xnvme_be_macos_driverkit_admin.c',
-  'xnvme_be_macos_driverkit_dev.c',
-  'xnvme_be_macos_driverkit_sync.c',
-  'xnvme_be_macos_driverkit_async.c',
-  'xnvme_be_macos_driverkit_mem.c',
-  'xnvme_be_nosys.c',
-  'xnvme_be_ramdisk.c',
-  'xnvme_be_ramdisk_admin.c',
-  'xnvme_be_ramdisk_dev.c',
-  'xnvme_be_ramdisk_sync.c',
-  'xnvme_be_spdk.c',
-  'xnvme_be_spdk_admin.c',
-  'xnvme_be_spdk_async.c',
-  'xnvme_be_spdk_dev.c',
-  'xnvme_be_spdk_mem.c',
-  'xnvme_be_spdk_sync.c',
-  'xnvme_be_libvfn.c',
-  'xnvme_be_libvfn_admin.c',
-  'xnvme_be_libvfn_async.c',
-  'xnvme_be_libvfn_dev.c',
-  'xnvme_be_libvfn_mem.c',
-  'xnvme_be_libvfn_sync.c',
-  'xnvme_be_windows.c',
-  'xnvme_be_windows_async_iocp.c',
-  'xnvme_be_windows_async_iocp_th.c',
-  'xnvme_be_windows_async_ioring.c',
-  'xnvme_be_windows_block.c',
-  'xnvme_be_windows_dev.c',
-  'xnvme_be_windows_fs.c',
-  'xnvme_be_windows_mem.c',
-  'xnvme_be_windows_nvme.c',
   'xnvme_buf.c',
   'xnvme_cli.c',
   'xnvme_cmd.c',
@@ -107,6 +53,14 @@ xnvmelib_deps = [
   hip_dep,
 ]
 
+subdir('cbi')
+subdir('spdk')
+subdir('libvfn')
+subdir('ramdisk')
+subdir('linux')
+subdir('freebsd')
+subdir('macos')
+subdir('windows')
 subdir('upcie')
 
 mapfile = 'libxnvme.map'
