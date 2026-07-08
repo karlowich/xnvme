@@ -61,8 +61,6 @@ extern struct xnvme_be_sync g_xnvme_be_windows_sync_nvme;
 /**
  * Implementations of the asynchronous command interface
  */
-extern struct xnvme_be_async g_xnvme_be_cbi_async_emu;
-extern struct xnvme_be_async g_xnvme_be_cbi_async_thrpool;
 extern struct xnvme_be_async g_xnvme_be_windows_async_iocp;
 extern struct xnvme_be_async g_xnvme_be_windows_async_iocp_th;
 extern struct xnvme_be_async g_xnvme_be_windows_async_ioring;
