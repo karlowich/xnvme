@@ -1,0 +1,44 @@
+---
+doc: |
+  xNVMe performance: build once, bench two backends, compare
+  ==========================================================
+
+  Single-build companion to xnvmeperf-regression: builds and installs whatever
+  ref is checked out in ``xnvme.repository.path`` (check out the branch under
+  test -- e.g. feat/be-dmamem -- before launching), sweeps xnvmeperf over the
+  backends in ``[regression].backends`` at the configured operating points, and
+  pairs the candidate backend against the baseline backend per point.
+
+  Unlike the regression workflow there is no baseline/candidate *build* A/B --
+  both backends come from the one build, so no ref switching happens here.
+
+  Usage::
+
+    cijoe -c configs/<target>.toml -c configs/dmamem-vs-upcie.toml \
+          workflows/xnvmeperf-backend-compare.yaml
+
+  The target config must provide ``[[devices]]``, ``xnvme.repository.path`` and
+  ``[os]``, with the environment prepared for the backends under test (driver
+  binding + hugepages). ``[regression].label`` names the result subdir; flip it
+  (iommu_off / iommu_on) between IOMMU states.
+
+steps:
+- name: show_ref
+  run: |
+    git -C {{ config.xnvme.repository.path }} rev-parse --short HEAD
+    git -C {{ config.xnvme.repository.path }} log -1 --oneline
+
+- name: build
+  uses: xnvme_build
+
+- name: install
+  uses: xnvme_install
+
+- name: ldconfig
+  run: ldconfig /usr/local/lib/ || true
+
+- name: bench
+  uses: xnvmeperf_bench
+
+- name: compare
+  uses: xnvmeperf_backend_compare

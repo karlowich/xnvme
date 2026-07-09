@@ -1,0 +1,54 @@
+# dmamem-vs-upcie backend comparison scenario
+#
+# Benchmarks the host `dmamem` backend (safl:feat/be-dmamem) against the
+# established host `upcie` backend at a single I/O size across four thread/core
+# placements, then pairs them per placement. Both backends are CPU-initiated
+# host-memory I/O; which DMA path each takes is decided by the driver bound to
+# the device, so the IOMMU state is chosen out-of-band (see below), not here.
+#
+# Combine with a target/transport config that provides [[devices]] (and the
+# environment prep), e.g.:
+#
+#   cijoe -c configs/smrc.toml -c configs/dmamem-vs-upcie.toml \
+#         workflows/xnvmeperf-backend-compare.yaml
+#
+# IOMMU-off (devices on uio_pci_generic): upcie -> UIO, dmamem -> UIO_LUT.
+# IOMMU-on  (devices on vfio-pci):        upcie -> VFIO, dmamem -> vfio-cdev/type1.
+# Flip the label below (iommu_off / iommu_on) so the two passes land in separate
+# result subdirs.
+#
+# The runner (xnvmeperf_bench) reads these under [regression]; the comparator
+# (xnvmeperf_backend_compare) reuses the same section.
+[regression]
+backends = ["upcie", "dmamem"]
+iosizes = [512]
+qdepths = [128]
+ndevs = [16]
+
+# Four thread/core placements, all on socket0 / NUMA node0 (even CPUs) to avoid a
+# cross-socket confound. smrc SMT sibling of cpu0 is cpu82; cpu2 is a distinct
+# core on the same socket. One pinned worker thread per set bit.
+#   0x1                     -> cpu0            : 1 thread  / 1 core
+#   0x400000000000000000001 -> cpu0,cpu82      : 2 threads / same core (SMT)
+#   0x5                     -> cpu0,cpu2       : 2 threads / 2 distinct cores
+#   0x400000000000000000005 -> cpu0,cpu2,cpu82 : 3 threads / 2 same core + 1 other
+cpumasks = [
+    "0x1",
+    "0x400000000000000000001",
+    "0x5",
+    "0x400000000000000000005",
+]
+iopattern = "randread"
+runtime = 10
+repetitions = 5
+
+# One result subdir per IOMMU state; set to iommu_on for the vfio-pci pass.
+label = "iommu_off"
+
+# Pairing: dmamem (candidate) vs upcie (baseline). A metric is flagged when it
+# differs by more than `tolerance` AND the two 95% confidence intervals are
+# disjoint. This is a characterization, not a CI gate -- the comparator reports
+# but does not fail the run.
+baseline_backend = "upcie"
+candidate_backend = "dmamem"
+tolerance = 0.01
