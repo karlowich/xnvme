@@ -970,7 +970,7 @@ static int
 xnvmeperf_cuda_run(struct xnvmeperf_args *args)
 {
 	struct xnvme_dev **devs;
-	uint64_t *rounds_per_dev, *failed_per_dev;
+	uint64_t *ios_per_dev, *failed_per_dev;
 	double elapsed_s;
 	float elapsed_ms = 0;
 	int err;
@@ -988,21 +988,21 @@ xnvmeperf_cuda_run(struct xnvmeperf_args *args)
 		return err;
 	}
 
-	rounds_per_dev = calloc(args->ndevs, sizeof(*rounds_per_dev));
+	ios_per_dev = calloc(args->ndevs, sizeof(*ios_per_dev));
 	failed_per_dev = calloc(args->ndevs, sizeof(*failed_per_dev));
 
-	if (!rounds_per_dev || !failed_per_dev) {
+	if (!ios_per_dev || !failed_per_dev) {
 		err = -ENOMEM;
 		xnvme_cli_perr("Failed: calloc()", err);
-		free(rounds_per_dev);
+		free(ios_per_dev);
 		free(failed_per_dev);
 		goto close_devs;
 	}
 
-	err = xnvmeperf_cuda_run_io(devs, args, rounds_per_dev, failed_per_dev, &elapsed_ms);
+	err = xnvmeperf_cuda_run_io(devs, args, ios_per_dev, failed_per_dev, &elapsed_ms);
 	if (err) {
 		xnvme_cli_perr("Failed: xnvmeperf_cuda_run_io()", err);
-		free(rounds_per_dev);
+		free(ios_per_dev);
 		free(failed_per_dev);
 		goto close_devs;
 	}
@@ -1012,7 +1012,7 @@ xnvmeperf_cuda_run(struct xnvmeperf_args *args)
 		double iops[args->ndevs], mibps[args->ndevs];
 
 		for (int i = 0; i < args->ndevs; i++) {
-			double total_ios = (double)rounds_per_dev[i] * args->qdepth;
+			double total_ios = (double)ios_per_dev[i];
 			iops[i] = total_ios / elapsed_s;
 			mibps[i] = (total_ios * args->iosize) / (elapsed_s * 1024.0 * 1024.0);
 		}
@@ -1020,7 +1020,7 @@ xnvmeperf_cuda_run(struct xnvmeperf_args *args)
 				   iops, mibps, failed_per_dev, NULL);
 	}
 
-	free(rounds_per_dev);
+	free(ios_per_dev);
 	free(failed_per_dev);
 
 close_devs:

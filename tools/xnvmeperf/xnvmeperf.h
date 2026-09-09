@@ -39,15 +39,15 @@ fill_pattern(void *buf, size_t nbytes, uint64_t slba, uint16_t nlb);
 #ifdef XNVME_BE_UPCIE_CUDA_ENABLED
 int
 xnvmeperf_cuda_run_io(struct xnvme_dev **devs, const struct xnvmeperf_args *args,
-		      uint64_t *rounds_per_dev, uint64_t *failed_per_dev, float *elapsed_ms);
+		      uint64_t *ios_per_dev, uint64_t *failed_per_dev, float *elapsed_ms);
 int
 xnvmeperf_cuda_verify_io(struct xnvme_dev **devs, const struct xnvmeperf_args *args);
 #else
 static inline int
 xnvmeperf_cuda_run_io(struct xnvme_dev **XNVME_UNUSED(devs),
 		      const struct xnvmeperf_args *XNVME_UNUSED(args),
-		      uint64_t *XNVME_UNUSED(rounds_per_dev),
-		      uint64_t *XNVME_UNUSED(failed_per_dev), float *XNVME_UNUSED(elapsed_ms))
+		      uint64_t *XNVME_UNUSED(ios_per_dev), uint64_t *XNVME_UNUSED(failed_per_dev),
+		      float *XNVME_UNUSED(elapsed_ms))
 {
 	return -ENOSYS;
 }
