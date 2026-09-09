@@ -107,16 +107,20 @@ xnvme_cuda_enqueue_at_i(struct xnvme_cuda_queue *qp, struct xnvme_spec_cmd *cmd,
 	struct xnvme_spec_cmd *sq = (struct xnvme_spec_cmd *)qp->sq;
 	uint16_t index            = (qp->tail + offset) % qp->depth;
 
-	// Copy the command to the SQ word-by-word. The destination uses a volatile
-	// pointer to bypass the per-SM L1 cache so writes reach system DRAM
-	// without waiting for eviction, making them visible to the NVMe DMA engine.
-	// The source does not need to be volatile: cmd is a per-thread local copy
-	// held in registers.
-	uint32_t *src          = (uint32_t *)cmd;
-	volatile uint32_t *dst = (volatile uint32_t *)&sq[index];
+	// The queue is in host memory, so store width is writes across the link.
+	// The source is read narrow: a per-thread local is not 16-byte aligned.
+	const uint32_t *src = (const uint32_t *)cmd;
+	uint4 *dst          = (uint4 *)&sq[index];
 
-	for (unsigned i = 0; i < sizeof(struct xnvme_spec_cmd) / sizeof(uint32_t); i++) {
-		dst[i] = src[i];
+	for (unsigned i = 0; i < sizeof(struct xnvme_spec_cmd) / sizeof(uint4); i++) {
+		uint4 quad;
+
+		quad.x = src[i * 4 + 0];
+		quad.y = src[i * 4 + 1];
+		quad.z = src[i * 4 + 2];
+		quad.w = src[i * 4 + 3];
+
+		__stwt(&dst[i], quad);
 	}
 }
 
