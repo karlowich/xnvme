@@ -192,6 +192,96 @@ xnvme_cuda_reap_at_i(struct xnvme_cuda_queue *qp, int timeout_ms, struct xnvme_s
 }
 
 /**
+ * Reap whatever completions the queue holds, as a run from the head
+ *
+ * The block reads one entry per thread from the head onwards and takes the run
+ * of them carrying the awaited phase, so what a call reaps is what has arrived
+ * rather than a count decided beforehand. That is what lets a queue be kept
+ * full: the slots a call frees are the ones to refill, and the rest stay in
+ * flight, where reaping a fixed count means waiting for the slowest of them
+ * with the queue draining behind it.
+ *
+ * The run has to be unbroken from the head, since the head is what the
+ * controller is told has been consumed; a completion sitting past a gap is left
+ * for the call that reaches it.
+ *
+ * Every thread of the block must call this and the return is the same in all of
+ * them. Thread `tid` holds the tid'th completion of the run when tid < the
+ * return, and its `cid` says which command it belongs to -- completions arrive
+ * in whatever order the controller finishes, not the order they were submitted,
+ * so the position a completion is read at says nothing about which command it
+ * is for.
+ *
+ * Does **not** advance the head or ring the doorbell; see xnvme_cuda_cq_update().
+ *
+ * @param qp Pointer to the NVMe queue pair to reap completions from
+ * @param tid The id of the thread calling the function (threadIdx.x)
+ * @param cpl Filled for tid < the returned count
+ * @param scratch Shared memory of at least blockDim.x / 32 + 1 uint32_t, the
+ *                same address in every thread
+ *
+ * @return Number of completions ready as a run from the head, 0 when none are
+ */
+static inline __device__ uint32_t
+xnvme_cuda_reap_ready(struct xnvme_cuda_queue *qp, size_t tid, struct xnvme_spec_cpl *cpl,
+		      uint32_t *scratch)
+{
+	const uint4 *cq       = (const uint4 *)qp->cq;
+	const uint32_t nwarps = (uint32_t)((blockDim.x + 31) / 32);
+	const uint32_t warp   = (uint32_t)(tid >> 5);
+	const uint32_t lane   = (uint32_t)(tid & 31);
+	uint32_t index        = qp->head + (uint32_t)tid;
+	uint32_t expected     = qp->phase;
+	uint4 entry;
+	unsigned mask;
+	uint32_t n;
+
+	/* A block never reads further than the ring is long, so an index runs past
+	 * the end at most once, and the entries past it carry the flipped tag. */
+	if (index >= qp->depth) {
+		index -= qp->depth;
+		expected ^= 1u;
+	}
+
+	entry = __ldcv(&cq[index]);
+
+	mask = __ballot_sync(0xffffffffu, ((entry.w >> 16) & 1u) == expected);
+	if (!lane) {
+		scratch[warp] = (mask == 0xffffffffu) ? 32u : (uint32_t)(__ffs((int)~mask) - 1);
+	}
+
+	__syncthreads();
+
+	/* A warp only adds to the run when every warp before it was full. */
+	if (!tid) {
+		uint32_t total = 0;
+
+		for (uint32_t w = 0; w < nwarps; ++w) {
+			total += scratch[w];
+			if (scratch[w] < 32u) {
+				break;
+			}
+		}
+		scratch[nwarps] = total;
+	}
+
+	__syncthreads();
+
+	n = scratch[nwarps];
+
+	if (tid < n) {
+		uint32_t *dst = (uint32_t *)cpl;
+
+		dst[0] = entry.x;
+		dst[1] = entry.y;
+		dst[2] = entry.z;
+		dst[3] = entry.w;
+	}
+
+	return n;
+}
+
+/**
  * Update the completion queue head and head doorbell
  *
  * This function updates the head and writes it to the MMIO doorbell register
