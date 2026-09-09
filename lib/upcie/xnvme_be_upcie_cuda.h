@@ -22,6 +22,8 @@ struct xnvme_be_upcie_cuda_rte {
 	struct cudamem_config cuda_config;
 	struct cudamem_heap cuda_heap;
 	struct dmamem dmem; ///< Shared translation; unused where each controller needs its own
+	void *host_va;      ///< Host heap base, registered with CUDA
+	CUdeviceptr host_devptr; ///< Device pointer for host_va
 	int is_initialized;
 };
 

@@ -20,6 +20,10 @@ _cuda_rte_term(void)
 		return;
 	}
 
+	if (g_upcie_cuda_rte.host_va) {
+		cuMemHostUnregister(g_upcie_cuda_rte.host_va);
+		g_upcie_cuda_rte.host_va = NULL;
+	}
 	dmamem_destroy(&g_upcie_cuda_rte.dmem);
 	cudamem_heap_term(&g_upcie_cuda_rte.cuda_heap);
 	cuCtxDestroy(g_upcie_cuda_rte.cu_ctx);
@@ -98,7 +102,36 @@ _cuda_rte_init(size_t heap_size, uint32_t gpu_id)
 		}
 	}
 
+	/* Set first, so the failures below can unwind through _cuda_rte_term(). */
 	g_upcie_cuda_rte.is_initialized = 1;
+
+	/* Device code writes submission queues here, so it needs a device pointer
+	 * onto the heap. Registered once, whole. */
+	if (!g_upcie_rte.mem.dmem.cpu_va ||
+	    (g_upcie_rte.mem.dmem.cpu_va != g_upcie_rte.mem.dmem.base_va)) {
+		XNVME_DEBUG("FAILED: the host heap is not mapped where its offsets start");
+		_cuda_rte_term();
+		return -ENOTSUP;
+	}
+
+	err = cuMemHostRegister(g_upcie_rte.mem.dmem.cpu_va, g_upcie_rte.mem.dmem.size,
+				CU_MEMHOSTREGISTER_DEVICEMAP);
+	if (err) {
+		XNVME_DEBUG("FAILED: cuMemHostRegister(host heap); CUresult(%d)", err);
+		_cuda_rte_term();
+		return -EIO;
+	}
+
+	err = cuMemHostGetDevicePointer(&g_upcie_cuda_rte.host_devptr, g_upcie_rte.mem.dmem.cpu_va,
+					0);
+	if (err) {
+		XNVME_DEBUG("FAILED: cuMemHostGetDevicePointer(); CUresult(%d)", err);
+		cuMemHostUnregister(g_upcie_rte.mem.dmem.cpu_va);
+		_cuda_rte_term();
+		return -EIO;
+	}
+
+	g_upcie_cuda_rte.host_va = g_upcie_rte.mem.dmem.cpu_va;
 
 	return 0;
 }
@@ -180,14 +213,13 @@ _cuda_dev_dmem_term(struct xnvme_dev *dev)
  * -------------
  * This backend uses a hybrid memory model for PCIe P2P DMA:
  *
- *  - NVMe control structures (SQ, CQ, PRP lists) are allocated from the host
- *    hugepage heap (g_upcie_rte).  The CPU writes these structures and the
- *    NVMe controller reads them; host hugepages are required because the
- *    controller cannot DMA-read GPU DRAM through BAR1 for the control path.
+ *  - The submission queue comes from the host hugepage heap (g_upcie_rte).
+ *    Device code writes it; the controller reads it from host memory, a
+ *    cheaper fetch than reading across PCIe into a peer BAR.
  *
- *  - Data buffers (xnvme_buf_alloc) are allocated from the CUDA device heap
- *    (g_upcie_cuda_rte).  The NVMe controller accesses these directly via
- *    PCIe P2P DMA, bypassing host DRAM entirely.
+ *  - The completion queue, PRP lists and data buffers (xnvme_buf_alloc) come
+ *    from the CUDA device heap (g_upcie_cuda_rte).  Keeping the completion
+ *    queue beside the data keeps every controller write to one destination.
  *
  * Consequently, both the host hugepage runtime (256 MiB) and the CUDA heap
  * (1 GiB) are initialized when the first upcie-cuda device is opened.

@@ -19,12 +19,14 @@
  * @param ctrlr Pointer to a pre-allocated NVMe controller
  * @param qpair Pointer to a queue-pair (from nvme_controller_cuda_create_io_qpair)
  * @param heap Pointer to CUDA Heap
+ * @param sq_owned Whether the submission queue came from `heap`; zero when it
+ *                 was given to the create as sq_va, which the caller frees
  *
  */
 static inline void
 nvme_controller_cuda_delete_io_qpair(struct nvme_controller *ctrlr,
                                      struct nvme_qpair_cuda *qpair,
-                                     struct cudamem_heap *heap)
+                                     struct cudamem_heap *heap, int sq_owned)
 {
 	struct nvme_qpair_cuda _qpair = {0};
 	int err;
@@ -71,7 +73,9 @@ nvme_controller_cuda_delete_io_qpair(struct nvme_controller *ctrlr,
 		}
 	}
 
-	cudamem_heap_block_free(heap, _qpair.sq);
+	if (sq_owned) {
+		cudamem_heap_block_free(heap, _qpair.sq);
+	}
 	cudamem_heap_block_free(heap, _qpair.cq);
 
 	nvme_qid_free(ctrlr->qids, _qpair.qid);
@@ -87,18 +91,29 @@ nvme_controller_cuda_delete_io_qpair(struct nvme_controller *ctrlr,
  * applies: a physical address with iommu=pt/off, an IOVA where an IOMMU
  * translates for the controller.
  *
+ * The submission queue may instead be given, as a pair of addresses for memory
+ * the caller holds: `sq_va`, where the device code writes an entry, and
+ * `sq_iova`, where the controller reads one. That is how a submission queue is
+ * placed outside `heap`, in host memory the GPU has been given a device pointer
+ * onto, while the completion queue stays beside the data in device memory. The
+ * caller zeroes what it gives and frees it once the queue is deleted; pass NULL
+ * to have the submission queue allocated from `heap` as the completion queue is.
+ *
  * @param ctrlr Pointer to a pre-allocated NVMe controller
  * @param qpair Pointer to a pre-allocated queue-pair (using CUDA)
  * @param depth The queue depth
  * @param heap Pointer to CUDA Heap
  * @param dmem The dmamem wrapping `heap`; resolves the queue addresses
+ * @param sq_va Device address of a caller-held submission queue, or NULL
+ * @param sq_iova Controller address of that submission queue; ignored when sq_va is NULL
  *
  * @return 0 on success. Negative values indicate errno-style errors, positive values are CUresult errors.
  */
 static inline int
 nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
                                      struct nvme_qpair_cuda *qpair, uint16_t depth,
-                                     struct cudamem_heap *heap, struct dmamem *dmem)
+                                     struct cudamem_heap *heap, struct dmamem *dmem,
+                                     void *sq_va, uint64_t sq_iova)
 {
 	/* _qpair declared at function scope so sq/cq remain accessible when building
 	 * the Create I/O CQ/SQ admin commands below. This code is inlined here
@@ -106,7 +121,8 @@ nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
 	 * device-code compilation units.
 	 */
 	struct nvme_qpair_cuda _qpair = {0};
-	uint64_t sq_iova, cq_iova;
+	const int sq_owned = !sq_va;
+	uint64_t cq_iova;
 	uint16_t qid;
 	int err, del_err, qid_orphaned = 0;
 
@@ -114,6 +130,13 @@ nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
 	 * rather than to zero, which no later check would catch. */
 	if (!heap || !dmem || (dmem->base_va != (void *)(uintptr_t)heap->vaddr)) {
 		UPCIE_DEBUG("FAILED: dmem is not the dmamem wrapping heap");
+		return -EINVAL;
+	}
+
+	/* A given submission queue resolves through nothing here, so an address the
+	 * controller cannot reach would only show as commands never fetched. */
+	if (!sq_owned && !sq_iova) {
+		UPCIE_DEBUG("FAILED: sq_va given without an address the controller can reach");
 		return -EINVAL;
 	}
 
@@ -164,12 +187,16 @@ nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
 			goto unregister_sqdb;
 		}
 
-		/* One element: the queue is created Physically Contiguous below. */
-		_qpair.sq = cudamem_dma_alloc_array(heap, 1, nbytes);
-		if (!_qpair.sq) {
-			err = -errno;
-			UPCIE_DEBUG("FAILED: cudamem_dma_alloc_array(sq); errno(%d)", err);
-			goto unregister_cqdb;
+		if (sq_owned) {
+			/* One element: the queue is created Physically Contiguous below. */
+			_qpair.sq = cudamem_dma_alloc_array(heap, 1, nbytes);
+			if (!_qpair.sq) {
+				err = -errno;
+				UPCIE_DEBUG("FAILED: cudamem_dma_alloc_array(sq); errno(%d)", err);
+				goto unregister_cqdb;
+			}
+		} else {
+			_qpair.sq = sq_va;
 		}
 
 		_qpair.cq = cudamem_dma_alloc_array(heap, 1, nbytes);
@@ -182,10 +209,12 @@ nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
 		/* The heap does not clear what it hands out, and a consumer reads a
 		 * completion as ready from its phase tag. Stale bytes carrying the
 		 * awaited phase are a completion that never happened. */
-		err = cuMemsetD8((CUdeviceptr)_qpair.sq, 0, nbytes);
-		if (err) {
-			UPCIE_DEBUG("FAILED: cuMemsetD8(sq); CUresult(%d)", err);
-			goto free_cq;
+		if (sq_owned) {
+			err = cuMemsetD8((CUdeviceptr)_qpair.sq, 0, nbytes);
+			if (err) {
+				UPCIE_DEBUG("FAILED: cuMemsetD8(sq); CUresult(%d)", err);
+				goto free_cq;
+			}
 		}
 
 		err = cuMemsetD8((CUdeviceptr)_qpair.cq, 0, nbytes);
@@ -194,7 +223,9 @@ nvme_controller_cuda_create_io_qpair(struct nvme_controller *ctrlr,
 			goto free_cq;
 		}
 
-		sq_iova = dmamem_va_to_iova(dmem, _qpair.sq);
+		if (sq_owned) {
+			sq_iova = dmamem_va_to_iova(dmem, _qpair.sq);
+		}
 		cq_iova = dmamem_va_to_iova(dmem, _qpair.cq);
 		if (!sq_iova || !cq_iova) {
 			err = -EFAULT;
@@ -256,7 +287,9 @@ delete_cq:
 free_cq:
 	cudamem_heap_block_free(heap, _qpair.cq);
 free_sq:
-	cudamem_heap_block_free(heap, _qpair.sq);
+	if (sq_owned) {
+		cudamem_heap_block_free(heap, _qpair.sq);
+	}
 unregister_cqdb:
 	cuMemHostUnregister(_qpair.cqdb);
 unregister_sqdb:

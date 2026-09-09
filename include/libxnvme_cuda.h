@@ -136,8 +136,19 @@ xnvme_cuda_enqueue_at_i(struct xnvme_cuda_queue *qp, struct xnvme_spec_cmd *cmd,
 static inline __device__ void
 xnvme_cuda_sq_update(struct xnvme_cuda_queue *qp, uint16_t increment)
 {
+	const uint16_t last        = (uint16_t)((qp->tail + increment - 1) % qp->depth);
+	volatile uint32_t *written = (volatile uint32_t *)&((struct xnvme_spec_cmd *)qp->sq)[last];
+
 	qp->tail = (qp->tail + increment) % qp->depth;
+
 	__threadfence_system(); // flush sq writes to system DRAM (visible to NVMe DMA)
+
+	/* PCIe orders posted writes per destination, so the doorbell can beat the
+	 * entries to the controller; reading one back pushes them out first. */
+	(void)*written;
+
+	__threadfence_system();
+
 	*(volatile uint32_t *)qp->sqdb = qp->tail;
 }
 
