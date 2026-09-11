@@ -144,6 +144,12 @@ conf_data.set('XNVME_BE_WINDOWS_FS_ENABLED', conf_data.get('XNVME_PLATFORM_WINDO
 conf_data.set('XNVME_BE_WINDOWS_ASYNC_ENABLED', conf_data.get('XNVME_PLATFORM_WINDOWS_ENABLED'))
 
 conf_data.set('XNVME_PLATFORM_LINUX_ENABLED', is_linux)
+conf_data.set(
+  'XNVME_BE_LINUX_DMABUF_IOMMU_ENABLED',
+  is_linux ? (cc.has_header('linux/dmabuf_import.h') and cc.has_header(
+    'linux/iommu_map_pa.h',
+  )) : false,
+)
 conf_data.set('XNVME_BE_LINUX_BLOCK_ENABLED', is_linux ? cc.has_header('linux/blkzoned.h') : false)
 conf_data.set('XNVME_BE_LINUX_BLOCK_ZONED_ENABLED', is_linux ? cc.has_header('linux/blkzoned.h') : false)
 conf_data.set(
